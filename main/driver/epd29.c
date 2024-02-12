@@ -31,8 +31,10 @@
 #define EPD29_PIN_SDA  11
 #define EPD29_SPI_HOST SPI2_HOST
 #endif
-#define EPD29_WIDTH 128
-#define EPD29_HEIGHT 296
+
+uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT / 8] = {0};
+bool first_display = true;
+bool in_part_mode = false;
 
 // #define EPD29_SOFT_SPI 1
 
@@ -127,14 +129,70 @@ esp_err_t epd29_cmd(spi_device_handle_t spi, const uint8_t cmd) {
 #else
 
 esp_err_t epd29_data(spi_device_handle_t spi, const uint8_t *data, const size_t len) {
-  esp_err_t ret;
-  spi_transaction_t t;
-  memset(&t, 0, sizeof(t));
-  t.length = len * 8;
-  t.tx_buffer = data;
-  t.user = (void *) 1; // set DC to 1
-  ret = spi_device_polling_transmit(spi, &t);
-  assert(ret == ESP_OK);
+  ESP_LOGD(TAG, "epd29_data(data=%p, len=%d)", data, len);
+  const size_t batch = 512;
+  esp_err_t ret = ESP_OK;
+  size_t sz = batch;
+  if (sz > len) {
+    sz = len;
+  }
+  size_t pos = 0;
+  while (pos < len) {
+    ESP_LOGD(TAG, "spi transmit pos 0x%x", pos);
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = sz * 8;
+    t.tx_buffer = data + pos;
+    t.user = (void *) 1; // set DC to 1
+    // if (pos + sz < len) {
+    //   t.flags |= SPI_TRANS_CS_KEEP_ACTIVE;
+    // }
+    ret = spi_device_polling_transmit(spi, &t);
+    assert(ret == ESP_OK);
+    pos += sz;
+    if (pos == len) {
+      break;
+    }
+    if (pos + batch > len) {
+      sz = len - pos;
+    } else {
+      sz = batch;
+    }
+  }
+  return ret;
+}
+
+esp_err_t epd29_data_value(spi_device_handle_t spi, const uint8_t data, const size_t len) {
+  const size_t batch = 512;
+  uint8_t buffer[batch];
+  memset(buffer, data, batch);
+  if (batch >= len) {
+    return epd29_data(spi, buffer, len);
+  }
+  esp_err_t ret = ESP_OK;
+  size_t sz = batch;
+  size_t pos = 0;
+  while (pos < len) {
+    spi_transaction_t t;
+    memset(&t, 0, sizeof(t));
+    t.length = sz * 8;
+    t.tx_buffer = buffer;
+    t.user = (void *) 1; // set DC to 1
+    // if (pos + sz < len) {
+    //   t.flags |= SPI_TRANS_CS_KEEP_ACTIVE;
+    // }
+    ret = spi_device_polling_transmit(spi, &t);
+    assert(ret == ESP_OK);
+    pos += sz;
+    if (pos == len) {
+      break;
+    }
+    if (pos + batch > len) {
+      sz = len - pos;
+    } else {
+      sz = batch;
+    }
+  }
   return ret;
 }
 
@@ -178,16 +236,16 @@ void epd29_reset() {
   gpio_set_level(EPD29_PIN_RST, 1);
   vTaskDelay(20 / portTICK_PERIOD_MS);
   gpio_set_level(EPD29_PIN_RST, 0);
-  vTaskDelay(400 / portTICK_PERIOD_MS);
+  vTaskDelay(150 / portTICK_PERIOD_MS);
   gpio_set_level(EPD29_PIN_RST, 1);
-  vTaskDelay(200 / portTICK_PERIOD_MS);
+  // vTaskDelay(100 / portTICK_PERIOD_MS);
 }
 
 esp_err_t epd29_wait_until_idle(void) {
   vTaskDelay(10 / portTICK_PERIOD_MS);
   while (gpio_get_level(EPD29_PIN_BUSY) == EPD29_BUSY_VAL) {
     vTaskDelay(10 / portTICK_PERIOD_MS);
-    // ESP_LOGI(TAG, "waiting busy...");
+    ESP_LOGD(TAG, "waiting busy...");
   }
   return ESP_OK;
 }
@@ -270,7 +328,6 @@ esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
 esp_err_t epd29_init_full(spi_device_handle_t spi) {
   epd29_reset();
   epd29_wait_until_idle();
-  epd29_cmd(spi, EPD_CMD_POWER_ON);
   epd29_cmd_data1(spi, EPD_CMD_PANEL_SETTING, 0x1f);
   {
     uint8_t data[3] = {
@@ -281,19 +338,95 @@ esp_err_t epd29_init_full(spi_device_handle_t spi) {
     epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
   }
   epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x97);
-  ESP_LOGI(TAG, "waiting init done");
+  epd29_cmd(spi, EPD_CMD_POWER_ON);
   epd29_wait_until_idle();
-  ESP_LOGI(TAG, "init done");
   return ESP_OK;
 }
 
 esp_err_t epd29_init_part(spi_device_handle_t spi) {
+  epd29_reset();
+  epd29_wait_until_idle();
+  epd29_cmd_data1(spi, EPD_CMD_PANEL_SETTING, 0xbf);
+  epd29_cmd_data1(spi, EPD_CMD_VCOM_DC_SETTING, 0x08);
+  {
+    uint8_t data[3] = {
+        EPD29_WIDTH,
+        EPD29_HEIGHT >> 8,
+        EPD29_HEIGHT & 0xff
+    };
+    epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
+  }
+  epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x17);
+  epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
+  epd29_cmd_data(spi, 0x21, lut_part_ww, sizeof(lut_part_ww));
+  epd29_cmd_data(spi, 0x22, lut_part_bw, sizeof(lut_part_bw));
+  epd29_cmd_data(spi, 0x23, lut_part_wb, sizeof(lut_part_wb));
+  epd29_cmd_data(spi, 0x24, lut_part_bb, sizeof(lut_part_bb));
+  epd29_cmd(spi, EPD_CMD_POWER_ON);
+  epd29_wait_until_idle();
+  in_part_mode = true;
   return ESP_OK;
 }
 
 esp_err_t epd29_display_frame(spi_device_handle_t spi) {
   epd29_cmd(spi, EPD_CMD_DISPLAY_REFRESH);
   epd29_wait_until_idle();
+  return ESP_OK;
+}
+
+void epd29_set_partial_window(spi_device_handle_t spi, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+  uint16_t xe = (x + w - 1) | 0x0007; // byte boundary inclusive (last byte)
+  uint16_t ye = y + h - 1;
+  uint8_t data[7] = {
+      x & 0xff, xe & 0xff,
+      y >> 8, y & 0xff,
+      ye >> 8, ye & 0xff,
+      0x01
+  };
+  epd29_cmd_data(spi, EPD_CMD_PARTIAL_WINDOW, data, sizeof(data));
+}
+
+esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t value) {
+  epd29_cmd(spi, command);
+  epd29_data_value(spi, value, EPD29_WIDTH * EPD29_HEIGHT / 8);
+  return ESP_OK;
+}
+
+esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
+  if (first_display) {
+    epd29_init_full(spi);
+    first_display = false;
+    epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
+    epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+    epd29_display_frame(spi);
+    return ESP_OK;
+  }
+  if (!in_part_mode) {
+    epd29_init_part(spi);
+  }
+  epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  epd29_display_frame(spi);
+  return ESP_OK;
+}
+
+esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
+  if (!in_part_mode) {
+    epd29_init_part(spi);
+  }
+  epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
+  epd29_set_partial_window(spi, 0, 0, EPD29_WIDTH, EPD29_HEIGHT);
+
+  uint8_t command;
+  if (first_display) {
+    command = EPD_CMD_START_TRAINS1;
+  } else {
+    command = EPD_CMD_START_TRAINS2;
+  }
+  epd29_cmd(spi, command);
+  epd29_data(spi, fb, sizeof(fb));
+
+  epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
+  epd29_display_frame(spi);
   return ESP_OK;
 }
 
@@ -355,9 +488,16 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
   }
 #endif
 
+  first_display = true;
   ret = epd29_init_full(*spi);
+  in_part_mode = false;
+  // ret = epd29_init_part(*spi);
+  // in_part_mode = true;
   ESP_ERROR_CHECK(ret);
 
+  memset(fb, 0xff, sizeof(fb));
+  epd29_clear(*spi, 0xff);
+  epd29_frame_sync(*spi);
   return ret;
 }
 
