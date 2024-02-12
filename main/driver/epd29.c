@@ -36,7 +36,7 @@ uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT / 8] = {0};
 bool first_display = true;
 bool in_part_mode = false;
 
-// #define EPD29_SOFT_SPI 1
+#define EPD29_SOFT_SPI 1
 
 #define reorder_bits(x)  ( \
   (((x >> 0) & 1) << 7) | \
@@ -77,6 +77,16 @@ esp_err_t epd29_data(spi_device_handle_t spi, const uint8_t *data, const size_t 
   gpio_set_level(EPD29_PIN_DC, 1);
   for (size_t i = 0; i < len; i++) {
     ep29_soft_spi_byte(data[i]);
+  }
+  gpio_set_level(EPD29_PIN_CS, 1);
+  return ESP_OK;
+}
+
+esp_err_t epd29_data_value(spi_device_handle_t spi, const uint8_t data, const size_t len) {
+  gpio_set_level(EPD29_PIN_CS, 0);
+  gpio_set_level(EPD29_PIN_DC, 1);
+  for (size_t i = 0; i < len; i++) {
+    ep29_soft_spi_byte(data);
   }
   gpio_set_level(EPD29_PIN_CS, 1);
   return ESP_OK;

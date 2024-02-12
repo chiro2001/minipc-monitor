@@ -1,0 +1,21 @@
+dependencies:
+  espressif/cmake_utilities:
+    component_hash: 351350613ceafba240b761b4ea991e0f231ac7a9f59a9ee901f751bddc0bb18f
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 0.5.3
+  espressif/lightbulb_driver:
+    component_hash: 7fd5f05a0631f6426f32ad4871c95b6d895e8e1b7bf230b2cc4eea439168aad9
+    source:
+      service_url: https://api.components.espressif.com/
+      type: service
+    version: 1.1.2
+  idf:
+    component_hash: null
+    source:
+      type: idf
+    version: 5.1.2
+manifest_hash: 724d63b788cbf7293e61c1c345b29fc4ccfb8b50222b365d1f14ac257dfdc6e6
+target: esp32c2
+version: 1.0.0
