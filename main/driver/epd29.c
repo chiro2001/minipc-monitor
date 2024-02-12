@@ -1,0 +1,363 @@
+#include <stdlib.h>
+#include <string.h>
+#include "esp_log.h"
+
+#include "epd29.h"
+
+#define TAG "epd92"
+
+#if defined(CONFIG_IDF_TARGET_ESP8266)
+#define EPD29_PIN_BUSY 5
+#define EPD29_PIN_RST  2
+#define EPD29_PIN_DC   4
+#define EPD29_PIN_CS   15
+#define EPD29_PIN_SCK  14
+#define EPD29_PIN_SDA  13
+#define EPD29_SPI_HOST HSPI_HOST
+#elif defined(CONFIG_IDF_TARGET_ESP32C2)
+#define EPD29_PIN_BUSY 3
+#define EPD29_PIN_RST  8
+#define EPD29_PIN_DC   10
+#define EPD29_PIN_CS   7
+#define EPD29_PIN_SCK  4
+#define EPD29_PIN_SDA  6
+#define EPD29_SPI_HOST SPI2_HOST
+#elif defined(CONFIG_IDF_TARGET_ESP32C3)
+#define EPD29_PIN_BUSY 2
+#define EPD29_PIN_RST  3
+#define EPD29_PIN_DC   10
+#define EPD29_PIN_CS   6
+#define EPD29_PIN_SCK  7
+#define EPD29_PIN_SDA  11
+#define EPD29_SPI_HOST SPI2_HOST
+#endif
+#define EPD29_WIDTH 128
+#define EPD29_HEIGHT 296
+
+// #define EPD29_SOFT_SPI 1
+
+#define reorder_bits(x)  ( \
+  (((x >> 0) & 1) << 7) | \
+  (((x >> 1) & 1) << 6) | \
+  (((x >> 2) & 1) << 5) | \
+  (((x >> 3) & 1) << 4) | \
+  (((x >> 4) & 1) << 3) | \
+  (((x >> 5) & 1) << 2) | \
+  (((x >> 6) & 1) << 1) | \
+  (((x >> 7) & 1) << 0)    \
+)
+
+#if EPD29_SOFT_SPI
+
+void ep29_soft_spi_byte_lsb(uint8_t data) {
+  for (int i = 0; i < 8; i++) {
+    gpio_set_level(EPD29_PIN_SCK, 0);
+    gpio_set_level(EPD29_PIN_SDA, (data & 0x01) ? 1 : 0);
+    data >>= 1;
+    gpio_set_level(EPD29_PIN_SCK, 1);
+  }
+}
+
+void ep29_soft_spi_byte_msb(uint8_t data) {
+  for (int i = 0; i < 8; i++) {
+    gpio_set_level(EPD29_PIN_SCK, 0);
+    gpio_set_level(EPD29_PIN_SDA, (data & 0x80) ? 1 : 0);
+    data <<= 1;
+    gpio_set_level(EPD29_PIN_SCK, 1);
+  }
+}
+
+// #define ep29_soft_spi_byte ep29_soft_spi_byte_lsb
+#define ep29_soft_spi_byte ep29_soft_spi_byte_msb
+
+esp_err_t epd29_data(spi_device_handle_t spi, const uint8_t *data, const size_t len) {
+  gpio_set_level(EPD29_PIN_CS, 0);
+  gpio_set_level(EPD29_PIN_DC, 1);
+  for (size_t i = 0; i < len; i++) {
+    ep29_soft_spi_byte(data[i]);
+  }
+  gpio_set_level(EPD29_PIN_CS, 1);
+  return ESP_OK;
+}
+
+esp_err_t epd29_cmd(spi_device_handle_t spi, const uint8_t cmd) {
+  gpio_set_level(EPD29_PIN_CS, 0);
+  gpio_set_level(EPD29_PIN_DC, 0);
+  ep29_soft_spi_byte(cmd);
+  gpio_set_level(EPD29_PIN_CS, 1);
+  gpio_set_level(EPD29_PIN_DC, 1);
+  return ESP_OK;
+}
+
+#else
+
+#if 0
+
+static uint8_t spi_convert_buf[512] = {0};
+static uint8_t spi_convert_cmd_buf;
+
+esp_err_t epd29_data(spi_device_handle_t spi, const uint8_t *data, const size_t len) {
+  esp_err_t ret;
+  spi_transaction_t t;
+  memset(&t, 0, sizeof(t));
+  for (size_t i = 0; i < len; i++) {
+    spi_convert_buf[i] = reorder_bits(data[i]);
+  }
+  t.length = len * 8;
+  t.tx_buffer = spi_convert_buf;
+  t.user = (void *) 1; // set DC to 1
+  ret = spi_device_polling_transmit(spi, &t);
+  assert(ret == ESP_OK);
+  return ret;
+}
+
+esp_err_t epd29_cmd(spi_device_handle_t spi, const uint8_t cmd) {
+  esp_err_t ret;
+  spi_transaction_t t;
+  memset(&t, 0, sizeof(t));
+  spi_convert_cmd_buf = reorder_bits(cmd);
+  t.length = 8;
+  t.tx_buffer = &spi_convert_cmd_buf;
+  t.user = (void *) 0; // set DC to 0
+  ret = spi_device_polling_transmit(spi, &t);
+  assert(ret == ESP_OK);
+  return ret;
+}
+
+#else
+
+esp_err_t epd29_data(spi_device_handle_t spi, const uint8_t *data, const size_t len) {
+  esp_err_t ret;
+  spi_transaction_t t;
+  memset(&t, 0, sizeof(t));
+  t.length = len * 8;
+  t.tx_buffer = data;
+  t.user = (void *) 1; // set DC to 1
+  ret = spi_device_polling_transmit(spi, &t);
+  assert(ret == ESP_OK);
+  return ret;
+}
+
+esp_err_t epd29_cmd(spi_device_handle_t spi, const uint8_t cmd) {
+  esp_err_t ret;
+  spi_transaction_t t;
+  memset(&t, 0, sizeof(t));
+  t.length = 8;
+  t.tx_buffer = &cmd;
+  t.user = (void *) 0; // set DC to 0
+  ret = spi_device_polling_transmit(spi, &t);
+  assert(ret == ESP_OK);
+  return ret;
+}
+
+#endif
+
+#endif
+
+esp_err_t epd29_cmd_data(spi_device_handle_t spi, const uint8_t cmd, const uint8_t *data, const size_t len) {
+  esp_err_t ret;
+  ret = epd29_cmd(spi, cmd);
+  assert(ret == ESP_OK);
+  if (data && len) {
+    ret = epd29_data(spi, data, len);
+  }
+  return ret;
+}
+
+esp_err_t epd29_cmd_data1(spi_device_handle_t spi, const uint8_t cmd, const uint8_t data) {
+  return epd29_cmd_data(spi, cmd, &data, 1);
+}
+
+void epd29_spi_pre_transfer_callback(spi_transaction_t *t) {
+  gpio_set_level(EPD29_PIN_DC, (int) t->user);
+}
+
+void epd29_reset() {
+  // reset
+  ESP_LOGI(TAG, "reset");
+  gpio_set_level(EPD29_PIN_RST, 1);
+  vTaskDelay(20 / portTICK_PERIOD_MS);
+  gpio_set_level(EPD29_PIN_RST, 0);
+  vTaskDelay(400 / portTICK_PERIOD_MS);
+  gpio_set_level(EPD29_PIN_RST, 1);
+  vTaskDelay(200 / portTICK_PERIOD_MS);
+}
+
+esp_err_t epd29_wait_until_idle(void) {
+  vTaskDelay(10 / portTICK_PERIOD_MS);
+  while (gpio_get_level(EPD29_PIN_BUSY) == EPD29_BUSY_VAL) {
+    vTaskDelay(10 / portTICK_PERIOD_MS);
+    // ESP_LOGI(TAG, "waiting busy...");
+  }
+  return ESP_OK;
+}
+
+#if defined(EPD_CHIP_SSD1680)
+esp_err_t epd29_init_full(spi_device_handle_t spi) {
+  epd29_reset();
+  epd29_wait_until_idle();
+  epd29_cmd(spi, EPD_CMD_SW_RESET);
+  epd29_wait_until_idle();
+  {
+    uint16_t epd_height = EPD29_HEIGHT;
+    uint8_t data[3] = {
+        (epd_height - 1) & 0xFF,
+        ((epd_height - 1) >> 8) & 0xFF,
+        0x00,
+    };
+    epd29_cmd_data(spi, EPD_CMD_DRIVER_OUTPUT_CONTROL, data, sizeof(data));
+  }
+  {
+    uint8_t data[3] = {0xd7, 0xd6, 0x9d};
+    epd29_cmd_data(spi, EPD_CMD_BOOSTER_SOFT_START_CONTROL, data, sizeof(data));
+  }
+  epd29_cmd_data1(spi, EPD_CMD_WRITE_VCOM_REGISTER, 0xa8);
+  epd29_cmd_data1(spi, EPD_CMD_SET_DUMMY_LINE_PERIOD, 0x1a);
+  epd29_cmd_data1(spi, EPD_CMD_DATA_ENTRY_MODE_SETTING, 0x03);
+  epd29_set_depth(spi, 0);
+  epd29_wait_until_idle();
+  return ESP_OK;
+}
+
+esp_err_t epd29_display_frame(spi_device_handle_t spi) {
+  epd29_cmd_data1(spi, EPD_CMD_DISPLAY_UPDATE_CONTROL_2, 0xc4);
+  epd29_cmd(spi, EPD_CMD_MASTER_ACTIVATION);
+  epd29_wait_until_idle();
+  return ESP_OK;
+}
+
+esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *lut, uint8_t depth) {
+  if (depth == 0) {
+    return epd29_cmd_data(spi, EPD_CMD_WRITE_LUT_REGISTER, lut, 30);
+  } else {
+    esp_err_t ret;
+    ret = epd29_cmd(spi, EPD_CMD_WRITE_LUT_REGISTER);
+    if (ret != ESP_OK) {
+      return ret;
+    }
+    for (int i = 0; i < 30; i++) {
+      if (i >= 20 && i <= 22) {
+        uint8_t idx = (depth - 1) * 3 + i - 20;
+        ret = epd29_data(spi, lut_gray_tp + idx, 1);
+      } else {
+        ret = epd29_data(spi, lut + i, 1);
+      }
+      if (ret != ESP_OK) {
+        return ret;
+      }
+    }
+    return ret;
+  }
+}
+
+esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
+  if (depth > 2) {
+    epd29_cmd_data1(spi, EPD_CMD_SET_GATE_TIME, 0x05);
+  } else if (depth == 2) {
+    epd29_cmd_data1(spi, EPD_CMD_SET_GATE_TIME, 0x02);
+  } else {
+    epd29_cmd_data1(spi, EPD_CMD_SET_GATE_TIME, 0x08);
+  }
+  if (depth > 0) {
+    epd29_set_lut(spi, lut_fast, depth);
+  } else {
+    epd29_set_lut(spi, lut_slow, depth);
+  }
+  return ESP_OK;
+}
+#elif defined(EPD_CHIP_UC8151D)
+
+esp_err_t epd29_init_full(spi_device_handle_t spi) {
+  epd29_reset();
+  epd29_wait_until_idle();
+  epd29_cmd(spi, EPD_CMD_POWER_ON);
+  epd29_cmd_data1(spi, EPD_CMD_PANEL_SETTING, 0x1f);
+  {
+    uint8_t data[3] = {
+        EPD29_WIDTH,
+        EPD29_HEIGHT >> 8,
+        EPD29_HEIGHT & 0xff
+    };
+    epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
+  }
+  epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x97);
+  ESP_LOGI(TAG, "waiting init done");
+  epd29_wait_until_idle();
+  ESP_LOGI(TAG, "init done");
+  return ESP_OK;
+}
+
+esp_err_t epd29_init_part(spi_device_handle_t spi) {
+  return ESP_OK;
+}
+
+esp_err_t epd29_display_frame(spi_device_handle_t spi) {
+  epd29_cmd(spi, EPD_CMD_DISPLAY_REFRESH);
+  epd29_wait_until_idle();
+  return ESP_OK;
+}
+
+#endif
+
+esp_err_t epd29_init(spi_device_handle_t *spi) {
+  esp_err_t ret = ESP_OK;
+  // setup gpio
+  {
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << EPD29_PIN_RST) | (1ULL << EPD29_PIN_DC);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_up_en = true;
+    gpio_config(&io_conf);
+  }
+  {
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask = (1ULL << EPD29_PIN_BUSY);
+    io_conf.mode = GPIO_MODE_INPUT;
+    #if (EPD29_BUSY_VAL)
+    io_conf.pull_down_en = true;
+    #else
+    io_conf.pull_up_en = true;
+    #endif
+    gpio_config(&io_conf);
+  }
+#if EPD29_SOFT_SPI
+  {
+    gpio_config_t io_conf = {};
+    io_conf.pin_bit_mask =
+        (1ULL << EPD29_PIN_CS) | (1ULL << EPD29_PIN_SCK) | (1ULL << EPD29_PIN_SDA);
+    io_conf.mode = GPIO_MODE_OUTPUT;
+    io_conf.pull_up_en = true;
+    gpio_config(&io_conf);
+  }
+#else
+  // init spi
+  if (*spi == NULL) {
+    spi_bus_config_t buscfg = {
+        .miso_io_num = -1,
+        .mosi_io_num = EPD29_PIN_SDA,
+        .sclk_io_num = EPD29_PIN_SCK,
+        .quadwp_io_num = -1,
+        .quadhd_io_num = -1,
+        .max_transfer_sz = 0,
+    };
+    spi_device_interface_config_t devcfg = {
+        .mode = 0,
+        .clock_speed_hz = 4000000,
+        .spics_io_num = EPD29_PIN_CS,
+        .queue_size = 7,
+        .pre_cb = epd29_spi_pre_transfer_callback,
+    };
+    ret = spi_bus_initialize(EPD29_SPI_HOST, &buscfg, SPI_DMA_CH_AUTO);
+    ESP_ERROR_CHECK(ret);
+
+    ret = spi_bus_add_device(EPD29_SPI_HOST, &devcfg, spi);
+    ESP_ERROR_CHECK(ret);
+  }
+#endif
+
+  ret = epd29_init_full(*spi);
+  ESP_ERROR_CHECK(ret);
+
+  return ret;
+}
+
