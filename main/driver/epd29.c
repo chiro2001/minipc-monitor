@@ -354,6 +354,48 @@ esp_err_t epd29_init_full(spi_device_handle_t spi) {
   return ESP_OK;
 }
 
+inline uint8_t epd29_level_to_phase(uint8_t depth) {
+  const static uint8_t table[17] = {
+    // 32, 32, 30, 28, 26, 24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2
+    // 32, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1
+    // 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
+    32, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
+  };
+  return table[depth < 17 ? depth : 0];
+}
+
+esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *_lut, uint8_t depth) {
+  uint8_t tmp[sizeof(lut_part_vcom)] = {0};
+  if (depth == 0) {
+    epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
+    epd29_cmd_data(spi, 0x21, lut_part_ww, sizeof(lut_part_ww));
+    epd29_cmd_data(spi, 0x22, lut_part_bw, sizeof(lut_part_bw));
+    epd29_cmd_data(spi, 0x23, lut_part_wb, sizeof(lut_part_wb));
+    epd29_cmd_data(spi, 0x24, lut_part_bb, sizeof(lut_part_bb));
+  } else {
+    memcpy(tmp, lut_part_vcom, sizeof(lut_part_vcom));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x20, tmp, sizeof(lut_part_vcom));
+    memcpy(tmp, lut_part_ww, sizeof(lut_part_ww));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x21, tmp, sizeof(lut_part_ww));
+    memcpy(tmp, lut_part_bw, sizeof(lut_part_bw));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x22, tmp, sizeof(lut_part_bw));
+    memcpy(tmp, lut_part_wb, sizeof(lut_part_wb));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x23, tmp, sizeof(lut_part_wb));
+    memcpy(tmp, lut_part_bb, sizeof(lut_part_bb));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x24, tmp, sizeof(lut_part_bb));
+  }
+  return ESP_OK;
+}
+
+esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
+  return epd29_set_lut(spi, NULL, depth);
+}
+
 esp_err_t epd29_init_part(spi_device_handle_t spi) {
   epd29_reset();
   epd29_wait_until_idle();

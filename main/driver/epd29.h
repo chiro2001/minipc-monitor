@@ -191,6 +191,8 @@ esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth);
 
 esp_err_t epd29_init_full(spi_device_handle_t spi);
 
+esp_err_t epd29_init_part(spi_device_handle_t spi);
+
 esp_err_t epd29_init(spi_device_handle_t *spi);
 
 esp_err_t epd29_display_frame(spi_device_handle_t spi);

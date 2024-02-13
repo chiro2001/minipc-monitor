@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 #include "esp_log.h"
 
 #include "epd29.h"
@@ -15,32 +16,33 @@
 #define CONFIG_WS2812_LED_GPIO 5
 
 void rgb_task(void *args) {
+  lightbulb_config_t config = {
+      //1. 选择 WS2812 输出并进行参数配置
+      .type = DRIVER_WS2812,
+      .driver_conf.ws2812.led_num = CONFIG_WS2812_LED_NUM,
+      .driver_conf.ws2812.ctrl_io = CONFIG_WS2812_LED_GPIO,
+      //2. 驱动功能选择，根据你的需要启用/禁用
+      .capability.enable_fade = true,
+      .capability.fade_time_ms = 800,
+      .capability.enable_status_storage = true,
+      /* 对于 WS2812 只能选择 LED_BEADS_3CH_RGB */
+      .capability.led_beads = LED_BEADS_3CH_RGB,
+      .capability.storage_cb = NULL,
+      //3. 限制参数，使用细则请参考后面小节
+      .external_limit = NULL,
+      //4. 颜色校准参数
+      .gamma_conf = NULL,
+      //5. 初始化照明参数，如果 on 置位将在初始化驱动时点亮球泡灯
+      .init_status.mode = WORK_COLOR,
+      .init_status.on = true,
+      .init_status.hue = 0,
+      .init_status.saturation = 100,
+      .init_status.value = 100,
+  };
+  lightbulb_init(&config);
+  uint32_t test_case = LIGHTING_RAINBOW | LIGHTING_ALEXA | LIGHTING_COLOR_EFFECT;
+  // uint32_t test_case = LIGHTING_WARM_TO_COLD;
   while (1) {
-    lightbulb_config_t config = {
-        //1. 选择 WS2812 输出并进行参数配置
-        .type = DRIVER_WS2812,
-        .driver_conf.ws2812.led_num = CONFIG_WS2812_LED_NUM,
-        .driver_conf.ws2812.ctrl_io = CONFIG_WS2812_LED_GPIO,
-        //2. 驱动功能选择，根据你的需要启用/禁用
-        .capability.enable_fade = true,
-        .capability.fade_time_ms = 800,
-        .capability.enable_status_storage = true,
-        /* 对于 WS2812 只能选择 LED_BEADS_3CH_RGB */
-        .capability.led_beads = LED_BEADS_3CH_RGB,
-        .capability.storage_cb = NULL,
-        //3. 限制参数，使用细则请参考后面小节
-        .external_limit = NULL,
-        //4. 颜色校准参数
-        .gamma_conf = NULL,
-        //5. 初始化照明参数，如果 on 置位将在初始化驱动时点亮球泡灯
-        .init_status.mode = WORK_COLOR,
-        .init_status.on = true,
-        .init_status.hue = 0,
-        .init_status.saturation = 100,
-        .init_status.value = 100,
-    };
-    lightbulb_init(&config);
-    uint32_t test_case = LIGHTING_RAINBOW | LIGHTING_ALEXA | LIGHTING_COLOR_EFFECT;
     lightbulb_lighting_output_test(test_case, 2000);
   }
 }
@@ -55,12 +57,14 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(err);
 
-  // xTaskCreate(rgb_task, "rgb_task", 4096, NULL, 5, NULL);
+  #if 0
+
+  xTaskCreate(rgb_task, "rgb_task", 4096, NULL, 5, NULL);
 
   spi_device_handle_t spi = NULL;
   int d = 0;
   epd29_init(&spi);
-  epd29_clear(spi, 0xff);
+  // epd29_clear(spi, 0xff);
   while (1) {
     for (int i = 0; i < EPD29_WIDTH / 8; i++) {
       for (int j = 0; j < EPD29_HEIGHT; j++) {
@@ -81,4 +85,28 @@ void app_main(void) {
     if (d >= EPD29_HEIGHT) d = 0;
     vTaskDelay(5000 / portTICK_PERIOD_MS);
   }
+
+  #else
+  spi_device_handle_t spi = NULL;
+  epd29_init(&spi);
+  // test gray
+  while (1) {
+    memset(fb, 0xff, sizeof(fb));
+    epd29_frame_sync_full(spi);
+    int level = 16;
+    for (int k = 0; k < level; k++) {
+      epd29_init_part(spi);
+      epd29_set_depth(spi, level - k);
+      memset(fb, 0xff, sizeof(fb));
+      for (int i = 0; i < EPD29_WIDTH / 8; i++) {
+        for (int j = 0; j < EPD29_HEIGHT / level * (k + 1); j++) {
+          fb[i + EPD29_WIDTH / 8 * j] = 0x00;
+        }
+      }
+      epd29_frame_sync(spi);
+    }
+    vTaskDelay(30000 / portTICK_PERIOD_MS);
+  }
+
+  #endif
 }
