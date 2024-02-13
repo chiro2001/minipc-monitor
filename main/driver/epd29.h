@@ -199,13 +199,18 @@ esp_err_t epd29_display_frame(spi_device_handle_t spi);
 
 esp_err_t epd29_frame_sync_full(spi_device_handle_t spi);
 
+esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi);
+
 esp_err_t epd29_frame_sync(spi_device_handle_t spi);
 
 esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color);
 
+void epd29_set_gray_level(uint8_t gray_level_);
+
 #define EPD29_WIDTH 128
 #define EPD29_HEIGHT 296
 
-extern uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT / 8];
+extern uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT];
+extern uint8_t fb_raw[EPD29_WIDTH * EPD29_HEIGHT / 8];
 
 #endif  // __EPD29_H__

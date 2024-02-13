@@ -69,9 +69,9 @@ void app_main(void) {
     for (int i = 0; i < EPD29_WIDTH / 8; i++) {
       for (int j = 0; j < EPD29_HEIGHT; j++) {
         if (d & 1) {
-          fb[i + EPD29_WIDTH / 8 * j] = 0x55 + d + j;
+          fb_raw[i + EPD29_WIDTH / 8 * j] = 0x55 + d + j;
         } else {
-          fb[i + EPD29_WIDTH / 8 * j] = ~(uint8_t)(0x55 + d + j);
+          fb_raw[i + EPD29_WIDTH / 8 * j] = ~(uint8_t)(0x55 + d + j);
         }
       }
     }
@@ -86,27 +86,49 @@ void app_main(void) {
     vTaskDelay(5000 / portTICK_PERIOD_MS);
   }
 
-  #else
+  #elif 0
   spi_device_handle_t spi = NULL;
   epd29_init(&spi);
   // test gray
   while (1) {
-    memset(fb, 0xff, sizeof(fb));
-    epd29_frame_sync_full(spi);
-    int level = 16;
+    // int level = 16;
+    int level = 32;
     for (int k = 0; k < level; k++) {
-      epd29_init_part(spi);
       epd29_set_depth(spi, level - k);
-      memset(fb, 0xff, sizeof(fb));
+      memset(fb_raw, 0xff, sizeof(fb_raw));
       for (int i = 0; i < EPD29_WIDTH / 8; i++) {
-        for (int j = 0; j < EPD29_HEIGHT / level * (k + 1); j++) {
-          fb[i + EPD29_WIDTH / 8 * j] = 0x00;
+        for (int j = 0; j < EPD29_HEIGHT * (k + 1) / level; j++) {
+          fb_raw[i + EPD29_WIDTH / 8 * j] = 0x00;
         }
       }
-      epd29_frame_sync(spi);
+      epd29_frame_sync_raw(spi);
     }
     vTaskDelay(30000 / portTICK_PERIOD_MS);
+    memset(fb_raw, 0xff, sizeof(fb_raw));
+    epd29_frame_sync_full(spi);
   }
-
+  #else
+  spi_device_handle_t spi = NULL;
+  ESP_LOGI(TAG, "init start");
+  epd29_init(&spi);
+  ESP_LOGI(TAG, "init color start");
+  memset(fb, 0x00, sizeof(fb));
+  for (int y = 0; y < EPD29_HEIGHT; y++) {
+    uint8_t color = y * 0xff / EPD29_HEIGHT;
+    ESP_LOGD(TAG, "y=%d, color=%d", y, color);
+    for (int x = 0; x < EPD29_WIDTH; x++) {
+      fb[y * EPD29_WIDTH + x] = color;
+    }
+  }
+  // test gray
+  while (1) {
+    ESP_LOGI(TAG, "sync start");
+    epd29_frame_sync(spi);
+    ESP_LOGI(TAG, "sync done");
+    vTaskDelay(30000 / portTICK_PERIOD_MS);
+    ESP_LOGI(TAG, "init sync full start");
+    memset(fb_raw, 0xff, sizeof(fb_raw));
+    epd29_frame_sync_full(spi);
+  }
   #endif
 }

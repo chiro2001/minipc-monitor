@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "epd29.h"
 
@@ -32,9 +33,13 @@
 #define EPD29_SPI_HOST SPI2_HOST
 #endif
 
-uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT / 8] = {0};
+uint8_t fb_raw[EPD29_WIDTH * EPD29_HEIGHT / 8] = {0};
+uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT] = {0};
 bool first_display = true;
 bool in_part_mode = false;
+// static uint8_t gray_level = 32;
+// static uint8_t gray_level = 16;
+static uint8_t gray_level = 8;
 
 #define EPD29_SOFT_SPI 1
 
@@ -354,17 +359,29 @@ esp_err_t epd29_init_full(spi_device_handle_t spi) {
   return ESP_OK;
 }
 
-inline uint8_t epd29_level_to_phase(uint8_t depth) {
-  const static uint8_t table[17] = {
-    // 32, 32, 30, 28, 26, 24, 22, 20, 18, 16, 14, 12, 10, 8, 6, 4, 2
-    // 32, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1
-    // 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1
-    32, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
-  };
-  return table[depth < 17 ? depth : 0];
+uint8_t epd29_level_to_phase(uint8_t depth) {
+  if (gray_level == 16) {
+    const static uint8_t table[17] = {
+        32, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
+    };
+    return table[depth < 17 ? depth : 0];
+  } else if (gray_level == 32) {
+    const static uint8_t table[33] = {
+        32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 16, 18
+    };
+    return table[depth < 33 ? depth : 0];
+  } else if (gray_level == 8) {
+    const static uint8_t table[9] = {
+        32, 1, 1, 1, 1, 2, 4, 8, 16
+    };
+    return table[depth < 9 ? depth : 0];
+  } else {
+    return 32;
+  }
 }
 
 esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *_lut, uint8_t depth) {
+  ESP_LOGD(TAG, "epd29_set_lut depth=%d", depth);
   uint8_t tmp[sizeof(lut_part_vcom)] = {0};
   if (depth == 0) {
     epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
@@ -389,11 +406,14 @@ esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *_lut, uint8_t de
     tmp[1] = epd29_level_to_phase(depth);
     epd29_cmd_data(spi, 0x24, tmp, sizeof(lut_part_bb));
   }
+  epd29_wait_until_idle();
   return ESP_OK;
 }
 
 esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
-  return epd29_set_lut(spi, NULL, depth);
+  epd29_init_part(spi);
+  epd29_set_lut(spi, NULL, depth);
+  return ESP_OK;
 }
 
 esp_err_t epd29_init_part(spi_device_handle_t spi) {
@@ -410,11 +430,7 @@ esp_err_t epd29_init_part(spi_device_handle_t spi) {
     epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
   }
   epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x17);
-  epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
-  epd29_cmd_data(spi, 0x21, lut_part_ww, sizeof(lut_part_ww));
-  epd29_cmd_data(spi, 0x22, lut_part_bw, sizeof(lut_part_bw));
-  epd29_cmd_data(spi, 0x23, lut_part_wb, sizeof(lut_part_wb));
-  epd29_cmd_data(spi, 0x24, lut_part_bb, sizeof(lut_part_bb));
+  epd29_set_lut(spi, NULL, 0);
   epd29_cmd(spi, EPD_CMD_POWER_ON);
   epd29_wait_until_idle();
   in_part_mode = true;
@@ -466,13 +482,14 @@ esp_err_t epd29_frame_sync_full(spi_device_handle_t spi) {
   if (in_part_mode) {
     epd29_init_full(spi);
   }
-  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb, sizeof(fb));
-  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb, sizeof(fb));
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb_raw, sizeof(fb_raw));
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb_raw, sizeof(fb_raw));
   epd29_display_frame(spi);
   return ESP_OK;
 }
 
-esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
+esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
+  int64_t start_time = esp_timer_get_time();
   if (!in_part_mode) {
     epd29_init_part(spi);
   }
@@ -486,10 +503,51 @@ esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
     command = EPD_CMD_START_TRAINS2;
   }
   epd29_cmd(spi, command);
-  epd29_data(spi, fb, sizeof(fb));
+  epd29_data(spi, fb_raw, sizeof(fb_raw));
 
   epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
   epd29_display_frame(spi);
+  ESP_LOGI(TAG, "draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
+  return ESP_OK;
+}
+
+bool epd29_convert(uint8_t depth) {
+  bool skip = true;
+  uint8_t cmp = depth * 0xfflu / gray_level;
+  for (size_t y = 0; y < EPD29_HEIGHT; y++) {
+    ESP_LOGD(TAG, "[y=%d] color=%d, cmp=%d, r=%d",
+             y, fb[y * EPD29_WIDTH], cmp, fb[y * EPD29_WIDTH] < cmp);
+    for (size_t x = 0; x < EPD29_WIDTH; x += 8) {
+      uint8_t b = 0;
+      for (size_t i = 0; i < 8; i++) {
+        uint8_t c = fb[x + i + y * EPD29_WIDTH];
+        if (c < cmp) {
+          b |= 1 << (7 - i);
+        }
+      }
+      b = ~b;
+      fb_raw[x / 8 + y * EPD29_WIDTH / 8] = b;
+      if (skip && b != 0xff) {
+        skip = false;
+      }
+    }
+  }
+  return skip;
+}
+
+esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
+  int64_t start_time = esp_timer_get_time();
+  for (int k = 0; k < gray_level; k++) {
+    bool skip = epd29_convert(k);
+    if (!skip) {
+      epd29_set_depth(spi, gray_level - k);
+      epd29_frame_sync_raw(spi);
+      ESP_LOGI(TAG, "gray level %d done", k);
+    } else {
+      ESP_LOGI(TAG, "gray level %d skipped", k);
+    }
+  }
+  ESP_LOGI(TAG, "frame draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
   return ESP_OK;
 }
 
@@ -538,7 +596,7 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
     };
     spi_device_interface_config_t devcfg = {
         .mode = 0,
-        .clock_speed_hz = 4000000,
+        .clock_speed_hz = 24000000,
         .spics_io_num = EPD29_PIN_CS,
         .queue_size = 7,
         .pre_cb = epd29_spi_pre_transfer_callback,
@@ -556,9 +614,14 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
   // ret = epd29_init_part(*spi);
   ESP_ERROR_CHECK(ret);
 
-  memset(fb, 0xff, sizeof(fb));
-  epd29_clear(*spi, 0xff);
-  epd29_frame_sync(*spi);
+  memset(fb_raw, 0xff, sizeof(fb_raw));
+  memset(fb, 0x00, sizeof(fb));
+  // epd29_clear(*spi, 0xff);
+  epd29_frame_sync_full(*spi);
   return ret;
+}
+
+void epd29_set_gray_level(uint8_t gray_level_) {
+  gray_level = gray_level_;
 }
 
