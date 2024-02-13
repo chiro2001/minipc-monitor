@@ -242,7 +242,7 @@ void epd29_spi_pre_transfer_callback(spi_transaction_t *t) {
 
 void epd29_reset() {
   // reset
-  ESP_LOGI(TAG, "reset");
+  // ESP_LOGI(TAG, "reset");
   gpio_set_level(EPD29_PIN_RST, 1);
   vTaskDelay(20 / portTICK_PERIOD_MS);
   gpio_set_level(EPD29_PIN_RST, 0);
@@ -350,6 +350,7 @@ esp_err_t epd29_init_full(spi_device_handle_t spi) {
   epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x97);
   epd29_cmd(spi, EPD_CMD_POWER_ON);
   epd29_wait_until_idle();
+  in_part_mode = false;
   return ESP_OK;
 }
 
@@ -381,6 +382,7 @@ esp_err_t epd29_init_part(spi_device_handle_t spi) {
 esp_err_t epd29_display_frame(spi_device_handle_t spi) {
   epd29_cmd(spi, EPD_CMD_DISPLAY_REFRESH);
   epd29_wait_until_idle();
+  first_display = false;
   return ESP_OK;
 }
 
@@ -405,7 +407,6 @@ esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t val
 esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
   if (first_display) {
     epd29_init_full(spi);
-    first_display = false;
     epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
     epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
     epd29_display_frame(spi);
@@ -415,6 +416,16 @@ esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
     epd29_init_part(spi);
   }
   epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  epd29_display_frame(spi);
+  return ESP_OK;
+}
+
+esp_err_t epd29_frame_sync_full(spi_device_handle_t spi) {
+  if (in_part_mode) {
+    epd29_init_full(spi);
+  }
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb, sizeof(fb));
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb, sizeof(fb));
   epd29_display_frame(spi);
   return ESP_OK;
 }
@@ -500,9 +511,7 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
 
   first_display = true;
   ret = epd29_init_full(*spi);
-  in_part_mode = false;
   // ret = epd29_init_part(*spi);
-  // in_part_mode = true;
   ESP_ERROR_CHECK(ret);
 
   memset(fb, 0xff, sizeof(fb));

@@ -195,6 +195,8 @@ esp_err_t epd29_init(spi_device_handle_t *spi);
 
 esp_err_t epd29_display_frame(spi_device_handle_t spi);
 
+esp_err_t epd29_frame_sync_full(spi_device_handle_t spi);
+
 esp_err_t epd29_frame_sync(spi_device_handle_t spi);
 
 esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color);

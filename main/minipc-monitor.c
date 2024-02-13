@@ -21,22 +21,17 @@ void rgb_task(void *args) {
         .type = DRIVER_WS2812,
         .driver_conf.ws2812.led_num = CONFIG_WS2812_LED_NUM,
         .driver_conf.ws2812.ctrl_io = CONFIG_WS2812_LED_GPIO,
-
         //2. 驱动功能选择，根据你的需要启用/禁用
         .capability.enable_fade = true,
         .capability.fade_time_ms = 800,
         .capability.enable_status_storage = true,
-
         /* 对于 WS2812 只能选择 LED_BEADS_3CH_RGB */
         .capability.led_beads = LED_BEADS_3CH_RGB,
         .capability.storage_cb = NULL,
-
         //3. 限制参数，使用细则请参考后面小节
         .external_limit = NULL,
-
         //4. 颜色校准参数
         .gamma_conf = NULL,
-
         //5. 初始化照明参数，如果 on 置位将在初始化驱动时点亮球泡灯
         .init_status.mode = WORK_COLOR,
         .init_status.on = true,
@@ -60,7 +55,7 @@ void app_main(void) {
   }
   ESP_ERROR_CHECK(err);
 
-  xTaskCreate(rgb_task, "rgb_task", 4096, NULL, 5, NULL);
+  // xTaskCreate(rgb_task, "rgb_task", 4096, NULL, 5, NULL);
 
   spi_device_handle_t spi = NULL;
   int d = 0;
@@ -69,10 +64,18 @@ void app_main(void) {
   while (1) {
     for (int i = 0; i < EPD29_WIDTH / 8; i++) {
       for (int j = 0; j < EPD29_HEIGHT; j++) {
-        fb[i + EPD29_WIDTH / 8 * j] = 0x55 + d + j;
+        if (d & 1) {
+          fb[i + EPD29_WIDTH / 8 * j] = 0x55 + d + j;
+        } else {
+          fb[i + EPD29_WIDTH / 8 * j] = ~(uint8_t)(0x55 + d + j);
+        }
       }
     }
-    epd29_frame_sync(spi);
+    if (d & 1) {
+      epd29_frame_sync_full(spi);
+    } else {
+      epd29_frame_sync(spi);
+    }
     ESP_LOGI(TAG, "all done, d=%d", d);
     d++;
     if (d >= EPD29_HEIGHT) d = 0;
