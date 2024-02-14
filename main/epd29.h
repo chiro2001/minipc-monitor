@@ -213,4 +213,8 @@ void epd29_set_gray_level(uint8_t gray_level_);
 extern uint8_t fb[EPD29_WIDTH * EPD29_HEIGHT];
 extern uint8_t fb_raw[EPD29_WIDTH * EPD29_HEIGHT / 8];
 
+void epd29_set_pixel(int x, int y, uint8_t color);
+
+uint8_t epd29_get_pixel(int x, int y);
+
 #endif  // __EPD29_H__

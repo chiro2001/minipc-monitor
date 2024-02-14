@@ -1,5 +1,6 @@
 ## IDF Component Manager Manifest File
 dependencies:
+  espressif/esp_jpeg: "*"
   espressif/lightbulb_driver: "*"
   ## Required IDF version
   idf:

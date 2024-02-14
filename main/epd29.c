@@ -259,8 +259,8 @@ void epd29_reset() {
 esp_err_t epd29_wait_until_idle(void) {
   vTaskDelay(10 / portTICK_PERIOD_MS);
   while (gpio_get_level(EPD29_PIN_BUSY) == EPD29_BUSY_VAL) {
-    vTaskDelay(10 / portTICK_PERIOD_MS);
-    ESP_LOGD(TAG, "waiting busy...");
+    vTaskDelay(1);
+    // ESP_LOGD(TAG, "waiting busy...");
   }
   return ESP_OK;
 }
@@ -372,7 +372,7 @@ uint8_t epd29_level_to_phase(uint8_t depth) {
     return table[depth < 33 ? depth : 0];
   } else if (gray_level == 8) {
     const static uint8_t table[9] = {
-        32, 1, 1, 1, 1, 2, 4, 8, 16
+        32, 2, 2, 2, 4, 4, 10, 24, 42
     };
     return table[depth < 9 ? depth : 0];
   } else {
@@ -463,18 +463,21 @@ esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t val
 }
 
 esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
-  if (first_display) {
-    epd29_init_full(spi);
-    epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
-    epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
-    epd29_display_frame(spi);
-    return ESP_OK;
-  }
-  if (!in_part_mode) {
-    epd29_init_part(spi);
-  }
-  epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
-  epd29_display_frame(spi);
+  // if (first_display) {
+  //   epd29_init_full(spi);
+  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
+  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  //   epd29_display_frame(spi);
+  //   return ESP_OK;
+  // }
+  // if (!in_part_mode) {
+  //   epd29_init_part(spi);
+  // }
+  // epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  // epd29_display_frame(spi);
+
+  memset(fb_raw, color, sizeof(fb_raw));
+  epd29_frame_sync_full(spi);
   return ESP_OK;
 }
 
@@ -615,7 +618,7 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
   ESP_ERROR_CHECK(ret);
 
   memset(fb_raw, 0xff, sizeof(fb_raw));
-  memset(fb, 0x00, sizeof(fb));
+  memset(fb, 0xff, sizeof(fb));
   // epd29_clear(*spi, 0xff);
   epd29_frame_sync_full(*spi);
   return ret;
@@ -625,3 +628,15 @@ void epd29_set_gray_level(uint8_t gray_level_) {
   gray_level = gray_level_;
 }
 
+inline void epd29_set_pixel(int x, int y, uint8_t color) {
+  if (x < 0 || x >= EPD29_WIDTH) return;
+  if (y < 0 || y >= EPD29_HEIGHT) return;
+  // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
+  fb[y * EPD29_WIDTH + x] = color;
+}
+
+inline uint8_t epd29_get_pixel(int x, int y) {
+  if (x < 0 || x >= EPD29_WIDTH) return 0x00;
+  if (y < 0 || y >= EPD29_HEIGHT) return 0x00;
+  return fb[y * EPD29_WIDTH + x];
+}

@@ -1,0 +1,8 @@
+# ESP-IDF Partition Table
+# Name,   Type, SubType, Offset,  Size,   Flags
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+# for app
+factory,  app,  factory, 0x10000, 0x190000,
+# tail for flash storage, total 4 MiB
+storage,  data, spiffs,  0x200000,0x200000,
