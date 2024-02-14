@@ -529,17 +529,16 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
   epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
   epd29_set_partial_window(spi, window_x, window_y, window_w, window_h);
 
-  uint8_t command;
   if (first_display) {
-    command = EPD_CMD_START_TRAINS1;
-  } else {
-    command = EPD_CMD_START_TRAINS2;
+    epd29_clear(spi, 0xff);
   }
-  epd29_cmd(spi, command);
+  epd29_cmd(spi, EPD_CMD_START_TRAINS2);
   epd29_data(spi, fb_raw, window_w * window_h / 8);
+  epd29_cmd(spi, EPD_CMD_START_TRAINS1);
+  epd29_data_value(spi, 0xff, window_w * window_h / 8);
+  epd29_display_frame(spi);
 
   epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
-  epd29_display_frame(spi);
   ESP_LOGI(TAG, "draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
   return ESP_OK;
 }
