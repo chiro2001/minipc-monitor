@@ -45,7 +45,8 @@ JDEC jd;
 JRESULT rc;
 // PNG decoder
 pngle_t *pngle = NULL;
-uint8_t render_pixel_skip = 0;
+uint8_t render_pixel_skip = 1;
+uint8_t render_pixel_skip_off = 1;
 // buffers
 // uint8_t* source_buf = NULL;       // downloaded image
 static uint8_t tjpgd_work[3096];  // tjpgd 3096 is the minimum size
@@ -130,8 +131,8 @@ static int tjd_output(
   uint32_t h = rect->bottom - rect->top + 1;
   uint32_t image_width = jd->width;
   uint32_t image_height = jd->height;
-  uint8_t *bitmap_ptr = (uint8_t * )
-  bitmap;
+  uint8_t *bitmap_ptr = (uint8_t *)
+      bitmap;
 
   // Write to display
   int padding_x;
@@ -216,9 +217,9 @@ esp_err_t draw_jpeg_file(const char *filename, uint8_t *current_fb) {
   }
   ESP_LOGI("JPG", "width: %d height: %d", jd.width, jd.height);
   // auto set render_pixel_skip
-  render_pixel_skip = 0;
-  while (jd.width / (render_pixel_skip + 2) > EPD29_WIDTH &&
-         jd.height / (render_pixel_skip + 2) > EPD29_HEIGHT) {
+  render_pixel_skip = 1;
+  while (jd.width / (render_pixel_skip + render_pixel_skip_off) > EPD29_WIDTH ||
+         jd.height / (render_pixel_skip + render_pixel_skip_off) > EPD29_HEIGHT) {
     render_pixel_skip++;
   }
   ESP_LOGI("JPG", "render_pixel_skip: %d", render_pixel_skip);
@@ -233,17 +234,129 @@ esp_err_t draw_jpeg_file(const char *filename, uint8_t *current_fb) {
   vTaskDelay(0);
   time_decode = (esp_timer_get_time() - decode_start) / 1000;
 
-  ESP_LOGI("decode", "%"
-  PRIu32
-  " ms . image decompression", time_decode);
+  ESP_LOGI("decode", "%ld ms . image decompression", time_decode);
 
-  fclose(fp_reading);
+  if (fp_reading) {
+    fclose(fp_reading);
+  }
   fp_reading = NULL;
 
   return ESP_OK;
   error:
-  fclose(fp_reading);
+  if (fp_reading) {
+    fclose(fp_reading);
+  }
   fp_reading = NULL;
+  return ESP_FAIL;
+}
+
+void on_draw_png(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {
+  uint32_t r = rgba[0]; // 0 - 255
+  uint32_t g = rgba[1]; // 0 - 255
+  uint32_t b = rgba[2]; // 0 - 255
+  uint32_t a = rgba[3]; // 0: fully transparent, 255: fully opaque
+
+  int image_width = (int) pngle_get_width(pngle);
+  int image_height = (int) pngle_get_height(pngle);
+  int epd_width = EPD29_WIDTH;
+  int epd_height = EPD29_HEIGHT;
+
+  if (render_pixel_skip == 0xff) {
+    render_pixel_skip = 1;
+    while (image_width / (render_pixel_skip + render_pixel_skip_off) > epd_width ||
+           image_height / (render_pixel_skip + render_pixel_skip_off) > epd_height) {
+      render_pixel_skip++;
+    }
+    ESP_LOGI("PNG", "render_pixel_skip: %d", render_pixel_skip);
+    return;
+  }
+  if (render_pixel_skip > 1) {
+    image_width = image_width / render_pixel_skip;
+    image_height = image_height / render_pixel_skip;
+  }
+
+  int padding_x = (epd_width - image_width) / 2;
+  int padding_y = (epd_height - image_height) / 2;
+
+  // if (a == 0) {
+  //     // skip transparent pixels
+  //     return;
+  // }
+
+  uint32_t val = (r * 38 + g * 75 + b * 15) >> 7;  // @vroland recommended formula
+  // use alpha in white background
+  // val = (a == 0) ? 255 : val;
+  // val = (val * 256 / (256 - a)) & 0xff;
+  // uint8_t color = gamme_curve[val];
+  uint8_t color = val;
+
+  // // print info
+  // static int cnt = 0;
+  // if (cnt % 100 == 0)
+  //   ESP_LOGI("PNG", "x: %d y: %d w: %d h: %d r: %d g: %d b: %d a: %d val: %d px: %d py: %d color: %x",
+  //            x, y, w, h, r, g, b, a, val, padding_x, padding_y, color);
+  // cnt++;
+
+  if (render_pixel_skip == 0) {
+    for (uint32_t yy = 0; yy < h; yy++) {
+      for (uint32_t xx = 0; xx < w; xx++) {
+        epd29_set_pixel(xx + x + padding_x,
+                        yy + y + padding_y,
+                        color);
+      }
+    }
+  } else {
+    for (uint32_t yy = 0; yy < h; yy++) {
+      for (uint32_t xx = 0; xx < w; xx++) {
+        int xxx = xx + x;
+        int yyy = yy + y;
+        // if (xxx % render_pixel_skip != 0 || yyy % render_pixel_skip != 0) {
+        //   continue;
+        // }
+        epd29_set_pixel(xxx / render_pixel_skip + padding_x,
+                        yyy / render_pixel_skip + padding_y,
+                        color);
+      }
+    }
+  }
+  vTaskDelay(0);
+}
+
+esp_err_t draw_png_file(const char *filename, uint8_t *current_fb) {
+  fp_reading = fopen(filename, "rb");
+  if (!fp_reading) {
+    ESP_LOGE(__func__, "Failed to open file %s for reading", filename);
+    goto error;
+  }
+  int r = 0;
+  uint32_t decode_start = esp_timer_get_time();
+  if (pngle != NULL) {
+    pngle_destroy(pngle);
+    pngle = NULL;
+  }
+  pngle = pngle_new();
+  render_pixel_skip = 0xff;
+  pngle_set_user_data(pngle, current_fb);
+  pngle_set_draw_callback(pngle, on_draw_png);
+
+  uint8_t buf[1024];
+  while (!feof(fp_reading)) {
+    size_t bytes_read = fread(buf, 1, sizeof(buf), fp_reading);
+    r = pngle_feed(pngle, buf, bytes_read);
+    if (r < 0) {
+      ESP_LOGE(__func__, "PNG pngle_feed error: %d %s", r, pngle_error(pngle));
+      goto error;
+    }
+  }
+  time_decode = (esp_timer_get_time() - decode_start) / 1000;
+  ESP_LOGI("PNG", "width: %d height: %d", pngle_get_width(pngle), pngle_get_height(pngle));
+  ESP_LOGI("decode", "%ld ms . image decompression", time_decode);
+  return ESP_OK;
+  error:
+  if (fp_reading) {
+    fclose(fp_reading);
+    fp_reading = NULL;
+  }
   return ESP_FAIL;
 }
 
@@ -264,19 +377,34 @@ esp_err_t do_display_images(void) {
     ESP_LOGE(__func__, "unable to load path %s", storage_base_path);
     return ESP_FAIL;
   }
+  char full_path[256];
   while ((dir = readdir(d)) != NULL) {
     ESP_LOGI(TAG, "%s", dir->d_name);
     if (str_ends_with(dir->d_name, ".jpg")) {
       // found an image
-      ESP_LOGI(TAG, "Found image %s", dir->d_name);
-      char full_path[256];
+      ESP_LOGI(TAG, "Found jpg image %s", dir->d_name);
+      memset(fb, 0xff, sizeof(fb));
       snprintf(full_path, sizeof(full_path), "%s/%s", storage_base_path, dir->d_name);
       esp_err_t ret = draw_jpeg_file(full_path, fb);
       if (ret == ESP_OK) {
         ESP_LOGI(TAG, "Paint image done");
         epd29_clear(spi, 0xff);
         epd29_frame_sync(spi);
-        vTaskDelay(30000 / portTICK_PERIOD_MS);
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
+      } else {
+        vTaskDelay(1);
+      }
+    } else if (str_ends_with(dir->d_name, ".png")) {
+      // found an image
+      ESP_LOGI(TAG, "Found png image %s", dir->d_name);
+      memset(fb, 0xff, sizeof(fb));
+      snprintf(full_path, sizeof(full_path), "%s/%s", storage_base_path, dir->d_name);
+      esp_err_t ret = draw_png_file(full_path, fb);
+      if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "Paint image done");
+        epd29_clear(spi, 0xff);
+        epd29_frame_sync(spi);
+        vTaskDelay(3000 / portTICK_PERIOD_MS);
       } else {
         vTaskDelay(1);
       }
@@ -376,9 +504,9 @@ void app_main(void) {
   epd29_init(&spi);
   ESP_LOGI(TAG, "init color start");
 
-  // epd29_set_gray_level(32);
+  epd29_set_gray_level(32);
   // epd29_set_gray_level(8);
-  epd29_set_gray_level(16);
+  // epd29_set_gray_level(16);
 
   while (true) {
     do_display_images();

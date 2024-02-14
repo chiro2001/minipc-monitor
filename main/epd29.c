@@ -545,7 +545,7 @@ esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
     if (!skip) {
       epd29_set_depth(spi, gray_level - k);
       epd29_frame_sync_raw(spi);
-      ESP_LOGI(TAG, "gray level %d done", k);
+      ESP_LOGD(TAG, "gray level %d done", k);
     } else {
       ESP_LOGI(TAG, "gray level %d skipped", k);
     }
