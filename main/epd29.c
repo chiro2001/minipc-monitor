@@ -341,7 +341,6 @@ esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
   return ESP_OK;
 }
 #elif defined(EPD_CHIP_UC8151D)
-
 esp_err_t epd29_init_full(spi_device_handle_t spi) {
   epd29_reset();
   epd29_wait_until_idle();
@@ -558,7 +557,242 @@ esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
   ESP_LOGI(TAG, "frame draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
   return ESP_OK;
 }
+#elif defined(EPD_CHIP_UC8179)
+esp_err_t epd29_init_full(spi_device_handle_t spi) {
+  epd29_reset();
+  epd29_wait_until_idle();
+  epd29_cmd_data1(spi, EPD_CMD_PANEL_SETTING, 0x0f);
+  epd29_wait_until_idle();
+  {
+    uint8_t data[4] = {
+        EPD29_WIDTH >> 8,
+        EPD29_WIDTH & 0xff,
+        EPD29_HEIGHT >> 8,
+        EPD29_HEIGHT & 0xff
+    };
+    epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
+  }
+  {
+    uint8_t data[4] = {
+        0x07, 0x07, 0x3f, 0x3f
+    };
+    epd29_cmd_data(spi, EPD_CMD_POWER_SETTING, data, sizeof(data));
+  }
+  {
+    uint8_t data[2] = {
+        // 0x29, 0x07
+        0x11, 0x07
+    };
+    epd29_cmd_data(spi, EPD_CMD_VCOM_INTERVAL, data, sizeof(data));
+  }
+  epd29_cmd_data1(spi, EPD_CMD_TCOM_SETTING, 0x22);
+  epd29_cmd_data1(spi, 0x15, 0x00);
+  // epd29_cmd_data1(spi, EPD_CMD_CASCADE_SETTING, 0x02);
+  // epd29_cmd_data1(spi, EPD_CMD_FORCE_TEMP, 0x5a);
+  epd29_cmd(spi, EPD_CMD_POWER_ON);
+  epd29_wait_until_idle();
+  in_part_mode = false;
+  return ESP_OK;
+}
 
+uint8_t epd29_level_to_phase(uint8_t depth) {
+  if (gray_level == 16) {
+    const static uint8_t table[17] = {
+        32, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
+    };
+    return table[depth < 17 ? depth : 0];
+  } else if (gray_level == 32) {
+    const static uint8_t table[33] = {
+        32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 16, 18
+    };
+    return table[depth < 33 ? depth : 0];
+  } else if (gray_level == 8) {
+    const static uint8_t table[9] = {
+        32, 2, 2, 2, 4, 4, 10, 24, 42
+    };
+    return table[depth < 9 ? depth : 0];
+  } else {
+    return 32;
+  }
+}
+
+esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *_lut, uint8_t depth) {
+  ESP_LOGD(TAG, "epd29_set_lut depth=%d", depth);
+  uint8_t tmp[sizeof(lut_part_vcom)] = {0};
+  if (depth == 0) {
+    epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
+    epd29_cmd_data(spi, 0x21, lut_part_ww, sizeof(lut_part_ww));
+    epd29_cmd_data(spi, 0x22, lut_part_bw, sizeof(lut_part_bw));
+    epd29_cmd_data(spi, 0x23, lut_part_wb, sizeof(lut_part_wb));
+    epd29_cmd_data(spi, 0x24, lut_part_bb, sizeof(lut_part_bb));
+  } else {
+    memcpy(tmp, lut_part_vcom, sizeof(lut_part_vcom));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x20, tmp, sizeof(lut_part_vcom));
+    memcpy(tmp, lut_part_ww, sizeof(lut_part_ww));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x21, tmp, sizeof(lut_part_ww));
+    memcpy(tmp, lut_part_bw, sizeof(lut_part_bw));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x22, tmp, sizeof(lut_part_bw));
+    memcpy(tmp, lut_part_wb, sizeof(lut_part_wb));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x23, tmp, sizeof(lut_part_wb));
+    memcpy(tmp, lut_part_bb, sizeof(lut_part_bb));
+    tmp[1] = epd29_level_to_phase(depth);
+    epd29_cmd_data(spi, 0x24, tmp, sizeof(lut_part_bb));
+  }
+  epd29_wait_until_idle();
+  return ESP_OK;
+}
+
+esp_err_t epd29_set_depth(spi_device_handle_t spi, uint8_t depth) {
+  epd29_init_part(spi);
+  epd29_set_lut(spi, NULL, depth);
+  return ESP_OK;
+}
+
+esp_err_t epd29_init_part(spi_device_handle_t spi) {
+  epd29_reset();
+  epd29_wait_until_idle();
+  epd29_cmd_data1(spi, EPD_CMD_PANEL_SETTING, 0xbf);
+  epd29_cmd_data1(spi, EPD_CMD_VCOM_DC_SETTING, 0x08);
+  {
+    uint8_t data[3] = {
+        EPD29_WIDTH,
+        EPD29_HEIGHT >> 8,
+        EPD29_HEIGHT & 0xff
+    };
+    epd29_cmd_data(spi, EPD_CMD_RESOLUTION_SETTING, data, sizeof(data));
+  }
+  epd29_cmd_data1(spi, EPD_CMD_VCOM_INTERVAL, 0x17);
+  epd29_set_lut(spi, NULL, 0);
+  epd29_cmd(spi, EPD_CMD_POWER_ON);
+  epd29_wait_until_idle();
+  in_part_mode = true;
+  return ESP_OK;
+}
+
+esp_err_t epd29_display_frame(spi_device_handle_t spi) {
+  epd29_cmd(spi, EPD_CMD_DISPLAY_REFRESH);
+  vTaskDelay(1 / portTICK_PERIOD_MS);
+  epd29_wait_until_idle();
+  first_display = false;
+  return ESP_OK;
+}
+
+void epd29_set_partial_window(spi_device_handle_t spi, uint16_t x, uint16_t y, uint16_t w, uint16_t h) {
+  uint16_t xe = (x + w - 1) | 0x0007; // byte boundary inclusive (last byte)
+  uint16_t ye = y + h - 1;
+  uint8_t data[7] = {
+      x & 0xff, xe & 0xff,
+      y >> 8, y & 0xff,
+      ye >> 8, ye & 0xff,
+      0x01
+  };
+  epd29_cmd_data(spi, EPD_CMD_PARTIAL_WINDOW, data, sizeof(data));
+}
+
+esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t value) {
+  epd29_cmd(spi, command);
+  epd29_data_value(spi, value, EPD29_WIDTH * EPD29_HEIGHT / 8);
+  return ESP_OK;
+}
+
+esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
+  // if (first_display) {
+  //   epd29_init_full(spi);
+  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
+  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  //   epd29_display_frame(spi);
+  //   return ESP_OK;
+  // }
+  // if (!in_part_mode) {
+  //   epd29_init_part(spi);
+  // }
+  // epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
+  // epd29_display_frame(spi);
+
+  memset(fb_raw, color, sizeof(fb_raw));
+  epd29_frame_sync_full(spi);
+  return ESP_OK;
+}
+
+esp_err_t epd29_frame_sync_full(spi_device_handle_t spi) {
+  if (in_part_mode) {
+    epd29_init_full(spi);
+  }
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb_raw, sizeof(fb_raw));
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb_raw, sizeof(fb_raw));
+  epd29_display_frame(spi);
+  return ESP_OK;
+}
+
+esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
+  int64_t start_time = esp_timer_get_time();
+  if (!in_part_mode) {
+    epd29_init_part(spi);
+  }
+  epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
+  epd29_set_partial_window(spi, 0, 0, EPD29_WIDTH, EPD29_HEIGHT);
+
+  uint8_t command;
+  if (first_display) {
+    command = EPD_CMD_START_TRAINS1;
+  } else {
+    command = EPD_CMD_START_TRAINS2;
+  }
+  epd29_cmd(spi, command);
+  epd29_data(spi, fb_raw, sizeof(fb_raw));
+
+  epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
+  epd29_display_frame(spi);
+  ESP_LOGI(TAG, "draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
+  return ESP_OK;
+}
+
+bool epd29_convert(uint8_t depth) {
+  bool skip = true;
+  uint8_t cmp = depth * 0xfflu / gray_level;
+  for (size_t py = 0; py < EPD29_HEIGHT; py++) {
+    for (size_t px = 0; px < EPD29_WIDTH; px += 8) {
+      uint8_t b = 0;
+      for (size_t i = 0; i < 8; i++) {
+        uint8_t c;
+        if (direction == EPD29_DIR_PORTRAIT) {
+          c = epd29_get_pixel(px + i, py);
+        } else if (direction == EPD29_DIR_LANDSCAPE) {
+          c = epd29_get_pixel(py, EPD29_WIDTH - 1 - (px + i));
+        }
+        if (c < cmp) {
+          b |= 1 << (7 - i);
+        }
+      }
+      b = ~b;
+      fb_raw[px / 8 + py * EPD29_WIDTH / 8] = b;
+      if (skip && b != 0xff) {
+        skip = false;
+      }
+    }
+  }
+  return skip;
+}
+
+esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
+  int64_t start_time = esp_timer_get_time();
+  for (int k = 0; k < gray_level; k++) {
+    bool skip = epd29_convert(k);
+    if (!skip) {
+      epd29_set_depth(spi, gray_level - k);
+      epd29_frame_sync_raw(spi);
+      ESP_LOGD(TAG, "gray level %d done", k);
+    } else {
+      ESP_LOGI(TAG, "gray level %d skipped", k);
+    }
+  }
+  ESP_LOGI(TAG, "frame draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
+  return ESP_OK;
+}
 #endif
 
 esp_err_t epd29_init(spi_device_handle_t *spi) {

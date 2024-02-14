@@ -499,7 +499,7 @@ void app_main(void) {
     memset(fb_raw, 0xff, sizeof(fb_raw));
     epd29_frame_sync_full(spi);
   }
-  #else
+  #elif 0
   // Initializaze Flash Storage
   ESP_ERROR_CHECK(init_flash_storage());
 
@@ -514,6 +514,20 @@ void app_main(void) {
 
   while (true) {
     do_display_images();
+  }
+
+  #else
+
+  ESP_LOGI(TAG, "init start");
+  epd29_init(&spi);
+
+  while (true) {
+    epd29_init_full(spi);
+    ESP_LOGI(TAG, "clear start");
+    // epd29_clear(spi, 0x55);
+    epd29_frame_sync_full(spi);
+    ESP_LOGI(TAG, "clear stop");
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
 
   #endif
