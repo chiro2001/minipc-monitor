@@ -42,6 +42,9 @@ bool in_part_mode = false;
 static uint8_t gray_level = 8;
 
 static uint8_t direction = EPD29_DIR_LANDSCAPE;
+static int window_x = 0, window_y = 0;
+static int window_w = EPD29_WIDTH;
+static int window_h = EPD29_HEIGHT;
 
 #define EPD29_SOFT_SPI 1
 
@@ -458,7 +461,7 @@ void epd29_set_partial_window(spi_device_handle_t spi, uint16_t x, uint16_t y, u
 
 esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t value) {
   epd29_cmd(spi, command);
-  epd29_data_value(spi, value, EPD29_WIDTH * EPD29_HEIGHT / 8);
+  epd29_data_value(spi, value, window_w * window_h / 8);
   return ESP_OK;
 }
 
@@ -476,7 +479,7 @@ esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
   // epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
   // epd29_display_frame(spi);
 
-  // memset(fb_raw, color, sizeof(fb_raw));
+  // memset(fb_raw, color, window_w * window_h / 8);
   // epd29_frame_sync_full(spi);
 
   ESP_LOGI(TAG, "epd29_clear");
@@ -484,25 +487,25 @@ esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
   // epd29_set_depth(spi, 0);
   epd29_init_part(spi);
   epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
-  epd29_set_partial_window(spi, 0, 0, EPD29_WIDTH, EPD29_HEIGHT);
+  epd29_set_partial_window(spi, window_x, window_y, window_w, window_h);
   for (int k = 0; k < 2; k++) {
-    epd29_set_lut_with_phase(spi, 24 / (k + 1));
+    // epd29_set_lut_with_phase(spi, 36 / (k + 1));
+    epd29_set_lut_with_phase(spi, k ? 32 : 32);
     for (int i = 0; i < 2; i++) {
       epd29_cmd(spi, EPD_CMD_START_TRAINS1);
-      epd29_data_value(spi, color, sizeof(fb_raw));
+      epd29_data_value(spi, color, window_w * window_h / 8);
       epd29_cmd(spi, EPD_CMD_START_TRAINS2);
-      epd29_data_value(spi, ~color, sizeof(fb_raw));
+      epd29_data_value(spi, ~color, window_w * window_h / 8);
       epd29_display_frame(spi);
       color = ~color;
     }
   }
   epd29_cmd(spi, EPD_CMD_START_TRAINS1);
-  epd29_data_value(spi, color, sizeof(fb_raw));
+  epd29_data_value(spi, color, window_w * window_h / 8);
   epd29_cmd(spi, EPD_CMD_START_TRAINS2);
-  epd29_data_value(spi, color, sizeof(fb_raw));
+  epd29_data_value(spi, color, window_w * window_h / 8);
   epd29_display_frame(spi);
   epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
-  epd29_display_frame(spi);
   epd29_init_part(spi);
 
   return ESP_OK;
@@ -512,8 +515,8 @@ esp_err_t epd29_frame_sync_full(spi_device_handle_t spi) {
   if (in_part_mode) {
     epd29_init_full(spi);
   }
-  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb_raw, sizeof(fb_raw));
-  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb_raw, sizeof(fb_raw));
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS1, fb_raw, window_w * window_h / 8);
+  epd29_cmd_data(spi, EPD_CMD_START_TRAINS2, fb_raw, window_w * window_h / 8);
   epd29_display_frame(spi);
   return ESP_OK;
 }
@@ -524,7 +527,7 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
     epd29_init_part(spi);
   }
   epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
-  epd29_set_partial_window(spi, 0, 0, EPD29_WIDTH, EPD29_HEIGHT);
+  epd29_set_partial_window(spi, window_x, window_y, window_w, window_h);
 
   uint8_t command;
   if (first_display) {
@@ -533,7 +536,7 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
     command = EPD_CMD_START_TRAINS2;
   }
   epd29_cmd(spi, command);
-  epd29_data(spi, fb_raw, sizeof(fb_raw));
+  epd29_data(spi, fb_raw, window_w * window_h / 8);
 
   epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
   epd29_display_frame(spi);
@@ -544,22 +547,24 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
 bool epd29_convert(uint8_t depth) {
   bool skip = true;
   uint8_t cmp = depth * 0xfflu / gray_level;
-  for (size_t py = 0; py < EPD29_HEIGHT; py++) {
-    for (size_t px = 0; px < EPD29_WIDTH; px += 8) {
+  for (size_t py = 0; py < window_h; py++) {
+    for (size_t px = 0; px < window_w; px += 8) {
       uint8_t b = 0;
       for (size_t i = 0; i < 8; i++) {
         uint8_t c;
         if (direction == EPD29_DIR_PORTRAIT) {
           c = epd29_get_pixel(px + i, py);
         } else if (direction == EPD29_DIR_LANDSCAPE) {
-          c = epd29_get_pixel(py, EPD29_WIDTH - 1 - (px + i));
+          c = epd29_get_pixel(py, (window_x + window_w) - 1 - (px + i));
+        } else {
+          c = epd29_get_pixel(px + i, py);
         }
         if (c < cmp) {
           b |= 1 << (7 - i);
         }
       }
       b = ~b;
-      fb_raw[px / 8 + py * EPD29_WIDTH / 8] = b;
+      fb_raw[px / 8 + py * window_w / 8] = b;
       if (skip && b != 0xff) {
         skip = false;
       }
@@ -647,7 +652,7 @@ esp_err_t epd29_init(spi_device_handle_t *spi) {
   // ret = epd29_init_part(*spi);
   ESP_ERROR_CHECK(ret);
 
-  memset(fb_raw, 0xff, sizeof(fb_raw));
+  memset(fb_raw, 0xff, window_w * window_h / 8);
   memset(fb, 0xff, sizeof(fb));
   // epd29_clear(*spi, 0xff);
   epd29_frame_sync_full(*spi);
@@ -660,29 +665,31 @@ void epd29_set_gray_level(uint8_t gray_level_) {
 
 inline void epd29_set_pixel(int x, int y, uint8_t color) {
   if (direction == EPD29_DIR_PORTRAIT) {
-    if (x < 0 || x >= EPD29_WIDTH) return;
-    if (y < 0 || y >= EPD29_HEIGHT) return;
+    if (x < 0 || x >= window_w) return;
+    if (y < 0 || y >= window_h) return;
     // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
-    fb[y * EPD29_WIDTH + x] = color;
+    // fb[y * window_w + x] = color;
+    fb[(y + window_y) * window_w + x + window_x] = color;
   } else if (direction == EPD29_DIR_LANDSCAPE) {
-    if (x < 0 || x >= EPD29_HEIGHT) return;
-    if (y < 0 || y >= EPD29_WIDTH) return;
+    if (x < 0 || x >= window_h) return;
+    if (y < 0 || y >= window_w) return;
     // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
-    // fb[x * EPD29_WIDTH + y] = color;
-    fb[y * EPD29_HEIGHT + x] = color;
+    // fb[y * window_h + x] = color;
+    fb[(y + window_x) * window_h + x + window_y] = color;
   }
 }
 
 uint8_t epd29_get_pixel(int x, int y) {
   if (direction == EPD29_DIR_PORTRAIT) {
-    if (x < 0 || x >= EPD29_WIDTH) return 0x00;
-    if (y < 0 || y >= EPD29_HEIGHT) return 0x00;
-    return fb[y * EPD29_WIDTH + x];
+    if (x < 0 || x >= window_w) return 0x00;
+    if (y < 0 || y >= window_h) return 0x00;
+    // return fb[y * window_w + x];
+    return fb[(y + window_y) * window_w + x + window_x];
   } else if (direction == EPD29_DIR_LANDSCAPE) {
-    if (x < 0 || x >= EPD29_HEIGHT) return 0x00;
-    if (y < 0 || y >= EPD29_WIDTH) return 0x00;
-    // return fb[y * EPD29_WIDTH + y];
-    return fb[y * EPD29_HEIGHT + x];
+    if (x < 0 || x >= window_h) return 0x00;
+    if (y < 0 || y >= window_w) return 0x00;
+    // return fb[y * window_h + x];
+    return fb[(y + window_x) * window_h + x + window_y];
   } else {
     return 0x00;
   }
@@ -706,4 +713,48 @@ int epd29_get_dir(void) {
 
 void epd29_set_dir(int dir) {
   direction = dir;
+}
+
+void epd29_set_window(int x, int y, int w, int h) {
+  if (direction == EPD29_DIR_PORTRAIT) {
+    window_x = x;
+    window_y = y;
+    window_w = w;
+    window_h = h;
+  } else if (direction == EPD29_DIR_LANDSCAPE) {
+    window_x = y;
+    window_y = x;
+    window_w = h;
+    window_h = w;
+  }
+}
+
+void epd29_get_window(int *x, int *y, int *w, int *h) {
+  if (direction == EPD29_DIR_PORTRAIT) {
+    *x = window_x;
+    *y = window_y;
+    *w = window_w;
+    *h = window_h;
+  } else if (direction == EPD29_DIR_LANDSCAPE) {
+    *x = window_y;
+    *y = window_x;
+    *w = window_h;
+    *h = window_w;
+  }
+}
+
+int epd29_get_window_width(void) {
+  if (direction == EPD29_DIR_PORTRAIT)
+    return window_w;
+  else if (direction == EPD29_DIR_LANDSCAPE)
+    return window_h;
+  else return window_w;
+}
+
+int epd29_get_window_height(void) {
+  if (direction == EPD29_DIR_PORTRAIT)
+    return window_h;
+  else if (direction == EPD29_DIR_LANDSCAPE)
+    return window_w;
+  else return window_h;
 }

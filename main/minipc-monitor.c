@@ -138,11 +138,11 @@ static int tjd_output(
   int padding_x;
   int padding_y;
   if (render_pixel_skip > 1) {
-    padding_x = ((int) (epd29_width()) - (int) (image_width) / render_pixel_skip) / 2;
-    padding_y = ((int) (epd29_height()) - (int) (image_height) / render_pixel_skip) / 2;
+    padding_x = ((int) (epd29_get_window_width()) - (int) (image_width) / render_pixel_skip) / 2;
+    padding_y = ((int) (epd29_get_window_height()) - (int) (image_height) / render_pixel_skip) / 2;
   } else {
-    padding_x = ((int) (epd29_width()) - (int) (image_width)) / 2;
-    padding_y = ((int) (epd29_height()) - (int) (image_height)) / 2;
+    padding_x = ((int) (epd29_get_window_width()) - (int) (image_width)) / 2;
+    padding_y = ((int) (epd29_get_window_height()) - (int) (image_height)) / 2;
   }
 
   // ESP_LOGI(TAG, "tjd_output padding_x=%d padding_y=%d", padding_x, padding_y);
@@ -168,14 +168,7 @@ static int tjd_output(
     // uint32_t val = ((r * 30 + g * 59 + b * 11) / 100); // original formula
     uint32_t val = (r * 38 + g * 75 + b * 15) >> 7;  // @vroland recommended formula
     // uint32_t val = r;
-    if (render_pixel_skip > 1) {
-      epd29_set_pixel(xx + padding_x, yy + padding_y, val);
-    } else {
-      epd29_set_pixel(xx + padding_x, yy + padding_y, val);
-      // epd29_set_pixel(xx + padding_x, yy + padding_y,
-      //                 (val / render_pixel_skip) +
-      //                 epd29_get_pixel(xx + padding_x, yy + padding_y));
-    }
+    epd29_set_pixel(xx + padding_x, yy + padding_y, val);
   }
 
   return 1;
@@ -218,8 +211,8 @@ esp_err_t draw_jpeg_file(const char *filename, uint8_t *current_fb) {
   ESP_LOGI("JPG", "width: %d height: %d", jd.width, jd.height);
   // auto set render_pixel_skip
   render_pixel_skip = 1;
-  while (jd.width / (render_pixel_skip + render_pixel_skip_off) > epd29_width() ||
-         jd.height / (render_pixel_skip + render_pixel_skip_off) > epd29_height()) {
+  while (jd.width / (render_pixel_skip + render_pixel_skip_off) > epd29_get_window_width() ||
+         jd.height / (render_pixel_skip + render_pixel_skip_off) > epd29_get_window_height()) {
     render_pixel_skip++;
   }
   ESP_LOGI("JPG", "render_pixel_skip: %d", render_pixel_skip);
@@ -258,8 +251,8 @@ void on_draw_png(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
   int image_width = (int) pngle_get_width(pngle);
   int image_height = (int) pngle_get_height(pngle);
-  int epd_width = epd29_width();
-  int epd_height = epd29_height();
+  int epd_width = epd29_get_window_width();
+  int epd_height = epd29_get_window_height();
 
   if (render_pixel_skip == 0xff) {
     render_pixel_skip = 1;
@@ -285,7 +278,7 @@ void on_draw_png(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
   uint32_t val = (r * 38 + g * 75 + b * 15) >> 7;  // @vroland recommended formula
   // use alpha in white background
-  // val = (a == 0) ? 255 : val;
+  val = (a == 0) ? 255 : val;
   // val = (val * 256 / (256 - a)) & 0xff;
   // uint8_t color = gamme_curve[val];
   uint8_t color = val;
@@ -380,36 +373,42 @@ esp_err_t do_display_images(void) {
     return ESP_FAIL;
   }
   char full_path[256];
+  int cnt = 0;
+  bool success = true;
   while ((dir = readdir(d)) != NULL) {
     ESP_LOGI(TAG, "%s", dir->d_name);
+    if (success) {
+      if (cnt & 1) {
+        epd29_set_window(epd29_width() / 2, 0, epd29_width() / 2, epd29_height());
+      } else {
+        epd29_set_window(0, 0, epd29_width() / 2, epd29_height());
+      }
+      cnt++;
+    }
     if (str_ends_with(dir->d_name, ".jpg")) {
       // found an image
       ESP_LOGI(TAG, "Found jpg image %s", dir->d_name);
       memset(fb, 0xff, sizeof(fb));
       snprintf(full_path, sizeof(full_path), "%s/%s", storage_base_path, dir->d_name);
       esp_err_t ret = draw_jpeg_file(full_path, fb);
-      if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Paint image done");
-        epd29_clear(spi, 0xff);
-        epd29_frame_sync(spi);
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-      } else {
-        vTaskDelay(1);
-      }
+      success = ret == ESP_OK;
     } else if (str_ends_with(dir->d_name, ".png")) {
       // found an image
       ESP_LOGI(TAG, "Found png image %s", dir->d_name);
       memset(fb, 0xff, sizeof(fb));
       snprintf(full_path, sizeof(full_path), "%s/%s", storage_base_path, dir->d_name);
       esp_err_t ret = draw_png_file(full_path, fb);
-      if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Paint image done");
-        epd29_clear(spi, 0xff);
-        epd29_frame_sync(spi);
-        vTaskDelay(3000 / portTICK_PERIOD_MS);
-      } else {
-        vTaskDelay(1);
-      }
+      success = ret == ESP_OK;
+    } else {
+      success = false;
+    }
+    if (success) {
+      ESP_LOGI(TAG, "Paint image done");
+      epd29_clear(spi, 0xff);
+      epd29_frame_sync(spi);
+      vTaskDelay(3000 / portTICK_PERIOD_MS);
+    } else {
+      vTaskDelay(1);
     }
   }
   closedir(d);
@@ -503,17 +502,23 @@ void app_main(void) {
   // Initializaze Flash Storage
   ESP_ERROR_CHECK(init_flash_storage());
 
-  ESP_LOGI(TAG, "init start");
+  ESP_LOGI(TAG, "init");
   epd29_init(&spi);
-  ESP_LOGI(TAG, "init color start");
+  ESP_LOGI(TAG, "init config");
 
   epd29_set_dir(EPD29_DIR_LANDSCAPE);
-  // epd29_set_gray_level(32);
-  epd29_set_gray_level(8);
+  epd29_set_gray_level(32);
+  // epd29_set_gray_level(8);
   // epd29_set_gray_level(16);
+
+  ESP_LOGI(TAG, "loop start");
+  // epd29_set_window(epd29_width() / 2, 0, epd29_width() / 2, epd29_height());
+  // epd29_set_window(epd29_width() / 2, epd29_width() / 2, epd29_height());
+  // epd29_set_window(48, 0, epd29_height(), epd29_height());
 
   while (true) {
     do_display_images();
+    vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
 
   #endif

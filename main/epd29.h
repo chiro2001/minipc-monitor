@@ -225,6 +225,14 @@ int epd29_get_dir(void);
 
 void epd29_set_dir(int dir);
 
+void epd29_set_window(int x, int y, int w, int h);
+
+void epd29_get_window(int *x, int *y, int *w, int *h);
+
+int epd29_get_window_width(void);
+
+int epd29_get_window_height(void);
+
 enum {
   EPD29_DIR_PORTRAIT = 0,
   EPD29_DIR_LANDSCAPE = 1,
