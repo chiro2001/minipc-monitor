@@ -46,7 +46,7 @@ JRESULT rc;
 // PNG decoder
 pngle_t *pngle = NULL;
 uint8_t render_pixel_skip = 1;
-uint8_t render_pixel_skip_off = 1;
+uint8_t render_pixel_skip_off = 0;
 // buffers
 // uint8_t* source_buf = NULL;       // downloaded image
 static uint8_t tjpgd_work[3096];  // tjpgd 3096 is the minimum size
@@ -138,11 +138,11 @@ static int tjd_output(
   int padding_x;
   int padding_y;
   if (render_pixel_skip > 1) {
-    padding_x = ((int) (EPD29_WIDTH) - (int) (image_width) / render_pixel_skip) / 2;
-    padding_y = ((int) (EPD29_HEIGHT) - (int) (image_height) / render_pixel_skip) / 2;
+    padding_x = ((int) (epd29_width()) - (int) (image_width) / render_pixel_skip) / 2;
+    padding_y = ((int) (epd29_height()) - (int) (image_height) / render_pixel_skip) / 2;
   } else {
-    padding_x = ((int) (EPD29_WIDTH) - (int) (image_width)) / 2;
-    padding_y = ((int) (EPD29_HEIGHT) - (int) (image_height)) / 2;
+    padding_x = ((int) (epd29_width()) - (int) (image_width)) / 2;
+    padding_y = ((int) (epd29_height()) - (int) (image_height)) / 2;
   }
 
   // ESP_LOGI(TAG, "tjd_output padding_x=%d padding_y=%d", padding_x, padding_y);
@@ -218,8 +218,8 @@ esp_err_t draw_jpeg_file(const char *filename, uint8_t *current_fb) {
   ESP_LOGI("JPG", "width: %d height: %d", jd.width, jd.height);
   // auto set render_pixel_skip
   render_pixel_skip = 1;
-  while (jd.width / (render_pixel_skip + render_pixel_skip_off) > EPD29_WIDTH ||
-         jd.height / (render_pixel_skip + render_pixel_skip_off) > EPD29_HEIGHT) {
+  while (jd.width / (render_pixel_skip + render_pixel_skip_off) > epd29_width() ||
+         jd.height / (render_pixel_skip + render_pixel_skip_off) > epd29_height()) {
     render_pixel_skip++;
   }
   ESP_LOGI("JPG", "render_pixel_skip: %d", render_pixel_skip);
@@ -258,8 +258,8 @@ void on_draw_png(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
   int image_width = (int) pngle_get_width(pngle);
   int image_height = (int) pngle_get_height(pngle);
-  int epd_width = EPD29_WIDTH;
-  int epd_height = EPD29_HEIGHT;
+  int epd_width = epd29_width();
+  int epd_height = epd29_height();
 
   if (render_pixel_skip == 0xff) {
     render_pixel_skip = 1;
@@ -351,6 +351,8 @@ esp_err_t draw_png_file(const char *filename, uint8_t *current_fb) {
   time_decode = (esp_timer_get_time() - decode_start) / 1000;
   ESP_LOGI("PNG", "width: %d height: %d", pngle_get_width(pngle), pngle_get_height(pngle));
   ESP_LOGI("decode", "%ld ms . image decompression", time_decode);
+  fclose(fp_reading);
+  fp_reading = NULL;
   return ESP_OK;
   error:
   if (fp_reading) {
@@ -432,12 +434,12 @@ void app_main(void) {
   epd29_init(&spi);
   // epd29_clear(spi, 0xff);
   while (1) {
-    for (int i = 0; i < EPD29_WIDTH / 8; i++) {
-      for (int j = 0; j < EPD29_HEIGHT; j++) {
+    for (int i = 0; i < epd29_width() / 8; i++) {
+      for (int j = 0; j < epd29_height(); j++) {
         if (d & 1) {
-          fb_raw[i + EPD29_WIDTH / 8 * j] = 0x55 + d + j;
+          fb_raw[i + epd29_width() / 8 * j] = 0x55 + d + j;
         } else {
-          fb_raw[i + EPD29_WIDTH / 8 * j] = ~(uint8_t)(0x55 + d + j);
+          fb_raw[i + epd29_width() / 8 * j] = ~(uint8_t)(0x55 + d + j);
         }
       }
     }
@@ -448,7 +450,7 @@ void app_main(void) {
     }
     ESP_LOGI(TAG, "all done, d=%d", d);
     d++;
-    if (d >= EPD29_HEIGHT) d = 0;
+    if (d >= epd29_height()) d = 0;
     vTaskDelay(5000 / portTICK_PERIOD_MS);
   }
   #elif 0
@@ -461,9 +463,9 @@ void app_main(void) {
     for (int k = 0; k < level; k++) {
       epd29_set_depth(spi, level - k);
       memset(fb_raw, 0xff, sizeof(fb_raw));
-      for (int i = 0; i < EPD29_WIDTH / 8; i++) {
-        for (int j = 0; j < EPD29_HEIGHT * (k + 1) / level; j++) {
-          fb_raw[i + EPD29_WIDTH / 8 * j] = 0x00;
+      for (int i = 0; i < epd29_width() / 8; i++) {
+        for (int j = 0; j < epd29_height() * (k + 1) / level; j++) {
+          fb_raw[i + epd29_width() / 8 * j] = 0x00;
         }
       }
       epd29_frame_sync_raw(spi);
@@ -477,16 +479,17 @@ void app_main(void) {
   ESP_LOGI(TAG, "init start");
   epd29_init(&spi);
   ESP_LOGI(TAG, "init color start");
-  memset(fb, 0x00, sizeof(fb));
-  for (int y = 0; y < EPD29_HEIGHT; y++) {
-    uint8_t color = y * 0xff / EPD29_HEIGHT;
-    ESP_LOGD(TAG, "y=%d, color=%d", y, color);
-    for (int x = 0; x < EPD29_WIDTH; x++) {
-      fb[y * EPD29_WIDTH + x] = color + x / 3;
+  memset(fb, 0xff, sizeof(fb));
+  for (int y = 0; y < epd29_width(); y++) {
+    uint8_t color = y * 0xff / epd29_width();
+    for (int x = 0; x < epd29_height(); x++) {
+      epd29_set_pixel(x, y, color);
     }
   }
   // test gray
-  epd29_set_gray_level(32);
+  // epd29_set_gray_level(32);
+  epd29_set_gray_level(8);
+  epd29_init_part(spi);
   while (1) {
     ESP_LOGI(TAG, "sync start");
     epd29_frame_sync(spi);
@@ -504,6 +507,7 @@ void app_main(void) {
   epd29_init(&spi);
   ESP_LOGI(TAG, "init color start");
 
+  epd29_set_dir(EPD29_DIR_LANDSCAPE);
   epd29_set_gray_level(32);
   // epd29_set_gray_level(8);
   // epd29_set_gray_level(16);

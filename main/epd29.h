@@ -217,4 +217,17 @@ void epd29_set_pixel(int x, int y, uint8_t color);
 
 uint8_t epd29_get_pixel(int x, int y);
 
+int epd29_width(void);
+
+int epd29_height(void);
+
+int epd29_get_dir(void);
+
+void epd29_set_dir(int dir);
+
+enum {
+  EPD29_DIR_PORTRAIT = 0,
+  EPD29_DIR_LANDSCAPE = 1,
+};
+
 #endif  // __EPD29_H__

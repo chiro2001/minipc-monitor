@@ -41,6 +41,8 @@ bool in_part_mode = false;
 // static uint8_t gray_level = 16;
 static uint8_t gray_level = 8;
 
+static uint8_t direction = EPD29_DIR_LANDSCAPE;
+
 #define EPD29_SOFT_SPI 1
 
 #define reorder_bits(x)  ( \
@@ -517,19 +519,22 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
 bool epd29_convert(uint8_t depth) {
   bool skip = true;
   uint8_t cmp = depth * 0xfflu / gray_level;
-  for (size_t y = 0; y < EPD29_HEIGHT; y++) {
-    ESP_LOGD(TAG, "[y=%d] color=%d, cmp=%d, r=%d",
-             y, fb[y * EPD29_WIDTH], cmp, fb[y * EPD29_WIDTH] < cmp);
-    for (size_t x = 0; x < EPD29_WIDTH; x += 8) {
+  for (size_t py = 0; py < EPD29_HEIGHT; py++) {
+    for (size_t px = 0; px < EPD29_WIDTH; px += 8) {
       uint8_t b = 0;
       for (size_t i = 0; i < 8; i++) {
-        uint8_t c = fb[x + i + y * EPD29_WIDTH];
+        uint8_t c;
+        if (direction == EPD29_DIR_PORTRAIT) {
+          c = epd29_get_pixel(px + i, py);
+        } else if (direction == EPD29_DIR_LANDSCAPE) {
+          c = epd29_get_pixel(py, EPD29_WIDTH - 1 - (px + i));
+        }
         if (c < cmp) {
           b |= 1 << (7 - i);
         }
       }
       b = ~b;
-      fb_raw[x / 8 + y * EPD29_WIDTH / 8] = b;
+      fb_raw[px / 8 + py * EPD29_WIDTH / 8] = b;
       if (skip && b != 0xff) {
         skip = false;
       }
@@ -629,14 +634,51 @@ void epd29_set_gray_level(uint8_t gray_level_) {
 }
 
 inline void epd29_set_pixel(int x, int y, uint8_t color) {
-  if (x < 0 || x >= EPD29_WIDTH) return;
-  if (y < 0 || y >= EPD29_HEIGHT) return;
-  // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
-  fb[y * EPD29_WIDTH + x] = color;
+  if (direction == EPD29_DIR_PORTRAIT) {
+    if (x < 0 || x >= EPD29_WIDTH) return;
+    if (y < 0 || y >= EPD29_HEIGHT) return;
+    // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
+    fb[y * EPD29_WIDTH + x] = color;
+  } else if (direction == EPD29_DIR_LANDSCAPE) {
+    if (x < 0 || x >= EPD29_HEIGHT) return;
+    if (y < 0 || y >= EPD29_WIDTH) return;
+    // ESP_LOGI(TAG, "epd29_set_pixel(%d, %d, color=%x)", x, y, color);
+    // fb[x * EPD29_WIDTH + y] = color;
+    fb[y * EPD29_HEIGHT + x] = color;
+  }
 }
 
-inline uint8_t epd29_get_pixel(int x, int y) {
-  if (x < 0 || x >= EPD29_WIDTH) return 0x00;
-  if (y < 0 || y >= EPD29_HEIGHT) return 0x00;
-  return fb[y * EPD29_WIDTH + x];
+uint8_t epd29_get_pixel(int x, int y) {
+  if (direction == EPD29_DIR_PORTRAIT) {
+    if (x < 0 || x >= EPD29_WIDTH) return 0x00;
+    if (y < 0 || y >= EPD29_HEIGHT) return 0x00;
+    return fb[y * EPD29_WIDTH + x];
+  } else if (direction == EPD29_DIR_LANDSCAPE) {
+    if (x < 0 || x >= EPD29_HEIGHT) return 0x00;
+    if (y < 0 || y >= EPD29_WIDTH) return 0x00;
+    // return fb[y * EPD29_WIDTH + y];
+    return fb[y * EPD29_HEIGHT + x];
+  } else {
+    return 0x00;
+  }
+}
+
+int epd29_width(void) {
+  if (direction == EPD29_DIR_PORTRAIT) return EPD29_WIDTH;
+  if (direction == EPD29_DIR_LANDSCAPE) return EPD29_HEIGHT;
+  return EPD29_WIDTH;
+}
+
+int epd29_height(void) {
+  if (direction == EPD29_DIR_PORTRAIT) return EPD29_HEIGHT;
+  if (direction == EPD29_DIR_LANDSCAPE) return EPD29_WIDTH;
+  return EPD29_HEIGHT;
+}
+
+int epd29_get_dir(void) {
+  return direction;
+}
+
+void epd29_set_dir(int dir) {
+  direction = dir;
 }
