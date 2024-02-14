@@ -362,52 +362,50 @@ esp_err_t epd29_init_full(spi_device_handle_t spi) {
 }
 
 uint8_t epd29_level_to_phase(uint8_t depth) {
+  const static uint8_t default_value = 48;
   if (gray_level == 16) {
     const static uint8_t table[17] = {
-        32, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
+        default_value, 1, 1, 1, 1, 1, 1, 1, 1, 2, 3, 4, 6, 8, 10, 12, 16
     };
     return table[depth < 17 ? depth : 0];
   } else if (gray_level == 32) {
     const static uint8_t table[33] = {
-        32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 16, 18
+        default_value, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5, 5, 6, 6, 6, 7, 7, 8, 16, 18
     };
     return table[depth < 33 ? depth : 0];
   } else if (gray_level == 8) {
     const static uint8_t table[9] = {
-        32, 2, 2, 2, 4, 4, 10, 24, 42
+        default_value, 2, 2, 2, 4, 4, 10, 24, 42
     };
     return table[depth < 9 ? depth : 0];
   } else {
-    return 32;
+    return default_value;
   }
+}
+
+esp_err_t epd29_set_lut_with_phase(spi_device_handle_t spi, uint8_t phase) {
+  uint8_t tmp[sizeof(lut_part_vcom)] = {0};
+  memcpy(tmp, lut_part_vcom, sizeof(lut_part_vcom));
+  tmp[1] = phase;
+  epd29_cmd_data(spi, 0x20, tmp, sizeof(lut_part_vcom));
+  memcpy(tmp, lut_part_ww, sizeof(lut_part_ww));
+  tmp[1] = phase;
+  epd29_cmd_data(spi, 0x21, tmp, sizeof(lut_part_ww));
+  memcpy(tmp, lut_part_bw, sizeof(lut_part_bw));
+  tmp[1] = phase;
+  epd29_cmd_data(spi, 0x22, tmp, sizeof(lut_part_bw));
+  memcpy(tmp, lut_part_wb, sizeof(lut_part_wb));
+  tmp[1] = phase;
+  epd29_cmd_data(spi, 0x23, tmp, sizeof(lut_part_wb));
+  memcpy(tmp, lut_part_bb, sizeof(lut_part_bb));
+  tmp[1] = phase;
+  epd29_cmd_data(spi, 0x24, tmp, sizeof(lut_part_bb));
+  return ESP_OK;
 }
 
 esp_err_t epd29_set_lut(spi_device_handle_t spi, const uint8_t *_lut, uint8_t depth) {
   ESP_LOGD(TAG, "epd29_set_lut depth=%d", depth);
-  uint8_t tmp[sizeof(lut_part_vcom)] = {0};
-  if (depth == 0) {
-    epd29_cmd_data(spi, 0x20, lut_part_vcom, sizeof(lut_part_vcom));
-    epd29_cmd_data(spi, 0x21, lut_part_ww, sizeof(lut_part_ww));
-    epd29_cmd_data(spi, 0x22, lut_part_bw, sizeof(lut_part_bw));
-    epd29_cmd_data(spi, 0x23, lut_part_wb, sizeof(lut_part_wb));
-    epd29_cmd_data(spi, 0x24, lut_part_bb, sizeof(lut_part_bb));
-  } else {
-    memcpy(tmp, lut_part_vcom, sizeof(lut_part_vcom));
-    tmp[1] = epd29_level_to_phase(depth);
-    epd29_cmd_data(spi, 0x20, tmp, sizeof(lut_part_vcom));
-    memcpy(tmp, lut_part_ww, sizeof(lut_part_ww));
-    tmp[1] = epd29_level_to_phase(depth);
-    epd29_cmd_data(spi, 0x21, tmp, sizeof(lut_part_ww));
-    memcpy(tmp, lut_part_bw, sizeof(lut_part_bw));
-    tmp[1] = epd29_level_to_phase(depth);
-    epd29_cmd_data(spi, 0x22, tmp, sizeof(lut_part_bw));
-    memcpy(tmp, lut_part_wb, sizeof(lut_part_wb));
-    tmp[1] = epd29_level_to_phase(depth);
-    epd29_cmd_data(spi, 0x23, tmp, sizeof(lut_part_wb));
-    memcpy(tmp, lut_part_bb, sizeof(lut_part_bb));
-    tmp[1] = epd29_level_to_phase(depth);
-    epd29_cmd_data(spi, 0x24, tmp, sizeof(lut_part_bb));
-  }
+  epd29_set_lut_with_phase(spi, epd29_level_to_phase(depth));
   epd29_wait_until_idle();
   return ESP_OK;
 }
@@ -478,8 +476,35 @@ esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
   // epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
   // epd29_display_frame(spi);
 
-  memset(fb_raw, color, sizeof(fb_raw));
-  epd29_frame_sync_full(spi);
+  // memset(fb_raw, color, sizeof(fb_raw));
+  // epd29_frame_sync_full(spi);
+
+  ESP_LOGI(TAG, "epd29_clear");
+
+  // epd29_set_depth(spi, 0);
+  epd29_init_part(spi);
+  epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
+  epd29_set_partial_window(spi, 0, 0, EPD29_WIDTH, EPD29_HEIGHT);
+  for (int k = 0; k < 2; k++) {
+    epd29_set_lut_with_phase(spi, 24 / (k + 1));
+    for (int i = 0; i < 2; i++) {
+      epd29_cmd(spi, EPD_CMD_START_TRAINS1);
+      epd29_data_value(spi, color, sizeof(fb_raw));
+      epd29_cmd(spi, EPD_CMD_START_TRAINS2);
+      epd29_data_value(spi, ~color, sizeof(fb_raw));
+      epd29_display_frame(spi);
+      color = ~color;
+    }
+  }
+  epd29_cmd(spi, EPD_CMD_START_TRAINS1);
+  epd29_data_value(spi, color, sizeof(fb_raw));
+  epd29_cmd(spi, EPD_CMD_START_TRAINS2);
+  epd29_data_value(spi, color, sizeof(fb_raw));
+  epd29_display_frame(spi);
+  epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
+  epd29_display_frame(spi);
+  epd29_init_part(spi);
+
   return ESP_OK;
 }
 

@@ -508,8 +508,8 @@ void app_main(void) {
   ESP_LOGI(TAG, "init color start");
 
   epd29_set_dir(EPD29_DIR_LANDSCAPE);
-  epd29_set_gray_level(32);
-  // epd29_set_gray_level(8);
+  // epd29_set_gray_level(32);
+  epd29_set_gray_level(8);
   // epd29_set_gray_level(16);
 
   while (true) {
