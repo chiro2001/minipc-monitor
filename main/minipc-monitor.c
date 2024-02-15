@@ -8,7 +8,7 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 #include "esp_spiffs.h"
-
+#include "rpc_api.h"
 #include "epd29.h"
 #include "lightbulb.h"
 
@@ -498,7 +498,7 @@ void app_main(void) {
     memset(fb_raw, 0xff, sizeof(fb_raw));
     epd29_frame_sync_full(spi);
   }
-  #else
+  #elif 0
   // Initializaze Flash Storage
   ESP_ERROR_CHECK(init_flash_storage());
 
@@ -521,5 +521,8 @@ void app_main(void) {
     vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
 
+  #else
+  start_pc();
+  ESP_LOGI(TAG, "start pc done");
   #endif
 }

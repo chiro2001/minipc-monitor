@@ -2,6 +2,8 @@ idf_component_register(
 SRCS
         "minipc-monitor.c"
         "epd29.c"
+        "rpc_api.c"
+        "rpc_ble.c"
 INCLUDE_DIRS "."
 REQUIRES
         esp_jpeg
@@ -12,6 +14,7 @@ REQUIRES
         pngle
         esp_timer
         driver
+        protocomm
 )
 
 spiffs_create_partition_image(storage ../files

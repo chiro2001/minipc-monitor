@@ -466,30 +466,12 @@ esp_err_t epd29_fill_value(spi_device_handle_t spi, uint8_t command, uint8_t val
 }
 
 esp_err_t epd29_clear(spi_device_handle_t spi, uint8_t color) {
-  // if (first_display) {
-  //   epd29_init_full(spi);
-  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS1, color);
-  //   epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
-  //   epd29_display_frame(spi);
-  //   return ESP_OK;
-  // }
-  // if (!in_part_mode) {
-  //   epd29_init_part(spi);
-  // }
-  // epd29_fill_value(spi, EPD_CMD_START_TRAINS2, color);
-  // epd29_display_frame(spi);
-
-  // memset(fb_raw, color, window_w * window_h / 8);
-  // epd29_frame_sync_full(spi);
-
   ESP_LOGI(TAG, "epd29_clear");
 
-  // epd29_set_depth(spi, 0);
   epd29_init_part(spi);
   epd29_cmd(spi, EPD_CMD_PARTIAL_IN);
   epd29_set_partial_window(spi, window_x, window_y, window_w, window_h);
   for (int k = 0; k < 2; k++) {
-    // epd29_set_lut_with_phase(spi, 36 / (k + 1));
     epd29_set_lut_with_phase(spi, k ? 32 : 32);
     for (int i = 0; i < 2; i++) {
       epd29_cmd(spi, EPD_CMD_START_TRAINS1);
