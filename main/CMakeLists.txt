@@ -4,6 +4,8 @@ SRCS
         "epd29.c"
         "rpc_api.c"
         "rpc_ble.c"
+        "fonts.c"
+        "gui.c"
 INCLUDE_DIRS "."
 REQUIRES
         esp_jpeg
@@ -15,6 +17,15 @@ REQUIRES
         esp_timer
         driver
         protocomm
+EMBED_TXTFILES
+        ${project_dir}/resources/unicode2gbk.bin
+        ${project_dir}/resources/fonts/ASC12
+        ${project_dir}/resources/fonts/ASC16
+        ${project_dir}/resources/fonts/ASC48
+        ${project_dir}/resources/fonts/HZK12
+#        ${project_dir}/resources/fonts/HZK16
+#        ${project_dir}/resources/fonts/HZK24S
+#        ${project_dir}/resources/fonts/HZK32
 )
 
 spiffs_create_partition_image(storage ../files

@@ -11,6 +11,7 @@
 #include "rpc_api.h"
 #include "epd29.h"
 #include "lightbulb.h"
+#include "fonts.h"
 
 // image decoders
 #include "jpeg_decoder.h"
@@ -131,8 +132,8 @@ static int tjd_output(
   uint32_t h = rect->bottom - rect->top + 1;
   uint32_t image_width = jd->width;
   uint32_t image_height = jd->height;
-  uint8_t *bitmap_ptr = (uint8_t *)
-      bitmap;
+  uint8_t *bitmap_ptr = (uint8_t * )
+  bitmap;
 
   // Write to display
   int padding_x;
@@ -520,9 +521,72 @@ void app_main(void) {
     do_display_images();
     vTaskDelay(3000 / portTICK_PERIOD_MS);
   }
-
-  #else
+  #elif 0
   start_pc();
   ESP_LOGI(TAG, "start pc done");
+  #else
+  // test fonts
+  ESP_LOGI(TAG, "init");
+  epd29_init(&spi);
+  ESP_LOGI(TAG, "init config");
+
+  // epd29_set_dir(EPD29_DIR_LANDSCAPE);
+  epd29_set_dir(EPD29_DIR_PORTRAIT);
+  epd29_set_gray_level(0);
+  // const char *str = "测试文本";
+  const char *str = "all_in 奥利安";
+  const char *p = str;
+  const uint8_t *data = NULL;
+  int char_len = 0, data_len = 0;
+  int x = 0, y = 0;
+  // uint8_t fonts_size[] = {12, 16, 24, 32};
+  uint8_t fonts_size[] = {12};
+  uint8_t fonts_size_cnt = 0;
+  esp_err_t r;
+  while (true) {
+    uint8_t font_size = fonts_size[fonts_size_cnt];
+    do {
+      int64_t time_start = esp_timer_get_time();
+      r = fonts_get_data(p, font_size, &data, &char_len, &data_len);
+      if (r != ESP_OK) {
+        ESP_LOGE(TAG, "failed");
+        break;
+      }
+      uint8_t font_width = fonts_cjk_width(font_size);
+      uint8_t font_height = font_size;
+      if (char_len == 1) font_width /= 2;
+      if (data) {
+        for (int i = 0; i < font_width; i++) {
+          for (int j = 0; j < font_height; j++) {
+            uint8_t color = (data[(j * font_width + i) / 8] & (0x80 >> (i % 8))) ? 0x00 : 0xff;;
+            epd29_set_pixel(i + x, j + y, color);
+          }
+        }
+      }
+      char buf[32];
+      memcpy(buf, p, char_len);
+      buf[char_len] = '\0';
+      ESP_LOGD(TAG, "font_size=%d, char_len=%d, data_len=%d, char=%s, time=%ld us",
+               font_size, char_len, data_len, buf, (esp_timer_get_time() - time_start));
+      if (char_len == 1) {
+        x += font_width <= 8 ? 6 : font_width;
+      } else {
+        x += font_size <= 12 ? (font_size + 1) : font_size;
+      }
+      p += char_len;
+    } while (*p);
+    epd29_frame_sync(spi);
+
+    x = 0;
+    y += font_size <= 12 ? (font_size + 1) : font_size;
+    if (y >= epd29_get_window_height()) {
+      y = 0;
+      memset(fb, 0xff, sizeof(fb));
+      epd29_clear(spi, 0xff);
+    }
+    fonts_size_cnt = (fonts_size_cnt + 1) % sizeof(fonts_size);
+    p = str;
+    // vTaskDelay(500 / portTICK_PERIOD_MS);
+  }
   #endif
 }

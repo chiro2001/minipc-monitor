@@ -381,6 +381,8 @@ uint8_t epd29_level_to_phase(uint8_t depth) {
         default_value, 2, 2, 2, 4, 4, 10, 24, 42
     };
     return table[depth < 9 ? depth : 0];
+  } else if (gray_level <= 2) {
+    return default_value;
   } else {
     return default_value;
   }
@@ -521,13 +523,18 @@ esp_err_t epd29_frame_sync_raw(spi_device_handle_t spi) {
   epd29_display_frame(spi);
 
   epd29_cmd(spi, EPD_CMD_PARTIAL_OUT);
-  ESP_LOGI(TAG, "draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
+  ESP_LOGD(TAG, "draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
   return ESP_OK;
 }
 
 bool epd29_convert(uint8_t depth) {
   bool skip = true;
-  uint8_t cmp = depth * 0xfflu / gray_level;
+  uint8_t cmp;
+  if (gray_level <= 2) {
+    cmp = 0xff / 2;
+  } else {
+    cmp = depth * 0xfflu / gray_level;
+  }
   for (size_t py = 0; py < window_h; py++) {
     for (size_t px = 0; px < window_w; px += 8) {
       uint8_t b = 0;
@@ -556,17 +563,24 @@ bool epd29_convert(uint8_t depth) {
 
 esp_err_t epd29_frame_sync(spi_device_handle_t spi) {
   int64_t start_time = esp_timer_get_time();
-  for (int k = 0; k < gray_level; k++) {
-    bool skip = epd29_convert(k);
-    if (!skip) {
-      epd29_set_depth(spi, gray_level - k);
-      epd29_frame_sync_raw(spi);
-      ESP_LOGD(TAG, "gray level %d done", k);
-    } else {
-      ESP_LOGI(TAG, "gray level %d skipped", k);
+  if (gray_level <= 2) {
+    epd29_convert(0);
+    epd29_set_depth(spi, 0);
+    epd29_frame_sync_raw(spi);
+    ESP_LOGD(TAG, "binary level done");
+  } else {
+    for (int k = 0; k < gray_level; k++) {
+      bool skip = epd29_convert(k);
+      if (!skip) {
+        epd29_set_depth(spi, gray_level - k);
+        epd29_frame_sync_raw(spi);
+        ESP_LOGD(TAG, "gray level %d done", k);
+      } else {
+        ESP_LOGI(TAG, "gray level %d skipped", k);
+      }
     }
   }
-  ESP_LOGI(TAG, "frame draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
+  ESP_LOGD(TAG, "frame draw time %d ms", (int) ((esp_timer_get_time() - start_time) / 1000));
   return ESP_OK;
 }
 
